@@ -1,0 +1,5 @@
+config MTK_DUMMY_BATTERY
+	bool "MediaTek Dummy Battery Support"
+	default n
+	---help---
+	  MediaTek Dummy Battery Driver
