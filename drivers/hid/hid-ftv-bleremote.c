@@ -324,52 +324,15 @@ unlock:
 
 static int bleremote_audio_dev_open(struct inode *inode, struct file *file)
 {
-	int ret;
 	dbg_hid("ftvremote: bleremote_audio_dev_open\n");
-	mutex_lock(&audio_rw_lock);
-	if ((bleremote_dev.voice_active == true) && (bleremote_dev.hdev != NULL)) {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 15, 0))
-		ret = hid_hw_output_report(bleremote_dev.hdev, audio_start, sizeof(audio_start));
-#else
-		ret = bleremote_dev.hdev->hid_output_raw_report(bleremote_dev.hdev,
-			audio_start, sizeof(audio_start), HID_OUTPUT_REPORT);
-#endif
-		if (ret < 0)
-			dbg_hid("ftvremote:Audio Start Output report failed\n");
-		else
-			bleremote_dev.audio_state_started = true;
-	}
-	mutex_unlock(&audio_rw_lock);
+
 	return 0;
 }
 
 static int bleremote_audio_dev_close(struct inode *inode, struct file *file)
 {
-	int ret;
 	dbg_hid("ftvremote: bleremote_audio_dev_close\n");
-	mutex_lock(&audio_rw_lock);
-	if ((bleremote_dev.hdev != NULL) && (bleremote_dev.audio_state_started == true)) {
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 15, 0))
-		ret = hid_hw_output_report(bleremote_dev.hdev, audio_stop, sizeof(audio_stop));
-#else
-		ret = bleremote_dev.hdev->hid_output_raw_report(bleremote_dev.hdev,
-			audio_stop, sizeof(audio_stop), HID_OUTPUT_REPORT);
-#endif
-		if (ret < 0)
-			dbg_hid("ftvremote:Audio Start Output report failed\n");
-		else
-			bleremote_dev.audio_state_started = false;
 
-		/* Hold raw device pointer for active remote unless voice search key is released */
-		/* for the case that open/close is called multiple times after voice seach key is pressed */
-		if (bleremote_dev.voice_active == false) {
-			bleremote_dev.hdev = NULL;
-		}
-	}
-	mutex_unlock(&audio_rw_lock);
-	pr_warn("%s: Buffer Underrun packet loss count %u\n",
-			__func__, raw_audio_buffer_stream.underrun_count);
-	audio_buffer_stream_reset();
 	return 0;
 }
 
@@ -481,21 +444,57 @@ static int ftv_remote_raw_event(struct hid_device *hdev, struct hid_report *repo
 			if (bleremote_dev.voice_active == true)
 			return 1;
 			else {
+				int ret;
 				audio_buffer_stream_reset();
 				bleremote_dev.voice_active = true;
 				bleremote_dev.hdev = hdev;
 				dbg_hid("ftvremote: ftv_remote_raw_event voice active: TRUE device %p\n",
 					bleremote_dev.hdev);
+
+
+				mutex_lock(&audio_rw_lock);
+
+			#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 15, 0))
+				ret = hid_hw_output_report(bleremote_dev.hdev, audio_start, sizeof(audio_start));
+			#else
+				ret = bleremote_dev.hdev->hid_output_raw_report(bleremote_dev.hdev,
+					audio_start, sizeof(audio_start), HID_OUTPUT_REPORT);
+			#endif
+				if (ret < 0)
+					dbg_hid("ftvremote:Audio Start Output report failed\n");
+				else
+					bleremote_dev.audio_state_started = true;
+
+				mutex_unlock(&audio_rw_lock);
 			}
 		break;
 
 		case 0x00:
 			if ((bleremote_dev.voice_active == true) && (bleremote_dev.hdev == hdev)) {
+				int ret;
+
+				mutex_lock(&audio_rw_lock);
+
+			#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 15, 0))
+				ret = hid_hw_output_report(bleremote_dev.hdev, audio_stop, sizeof(audio_stop));
+			#else
+				ret = bleremote_dev.hdev->hid_output_raw_report(bleremote_dev.hdev,
+					audio_stop, sizeof(audio_stop), HID_OUTPUT_REPORT);
+			#endif
+				if (ret < 0)
+					dbg_hid("ftvremote:Audio Start Output report failed\n");
+				else
+					bleremote_dev.audio_state_started = false;
+
+				mutex_unlock(&audio_rw_lock);
+
 				dbg_hid("ftvremote: ftv_remote_raw_event voice active: FALSE device %p\n",
 					bleremote_dev.hdev);
 				pr_warn("%s: Buffer Underrun packet loss count %u\n",
 					__func__, raw_audio_buffer_stream.underrun_count);
+
 				bleremote_dev.voice_active = false;
+				bleremote_dev.hdev = NULL;
 			}
 		break;
 		}

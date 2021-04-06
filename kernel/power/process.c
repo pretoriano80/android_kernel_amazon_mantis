@@ -20,16 +20,12 @@
 #include <trace/events/power.h>
 #include <linux/wakeup_reason.h>
 #include <linux/cpuset.h>
-#include <linux/reboot.h>
 #include "../drivers/misc/mediatek/hdmi/hdmitx/mt8695/inc/hdmicec.h"
 
 /*
  * Timeout for stopping processes
  */
 unsigned int __read_mostly freeze_timeout_msecs = 20 * MSEC_PER_SEC;
-#ifdef CONFIG_SUSPEND_RAM
-bool mem_suspend_done = 0;
-#endif
 
 static int try_to_freeze_tasks(bool user_only)
 {
@@ -193,7 +189,6 @@ int freeze_kernel_threads(void)
 	/*disable CEC and hdmi irq when suspend to mem, recover by resume with reboot. WoBle can wake up to resume followed by a reboot*/
 	disable_irq(hdmi_irq);
 	hdmi_cec_deinit(global_cec);
-	mem_suspend_done = 1;
 #endif
 	error = try_to_freeze_tasks(false);
 	if (!error)
@@ -244,12 +239,7 @@ void thaw_processes(void)
 
 	schedule();
 	pr_cont("done.\n");
-#ifdef CONFIG_SUSPEND_RAM
-	/*reboot after resume from mem suspend*/
-	if (mem_suspend_done) {
-		emergency_restart();
-	}
-#endif
+
 	trace_suspend_resume(TPS("thaw_processes"), 0, false);
 }
 

@@ -95,6 +95,10 @@ static void hdmi_shutdown(struct platform_device *pdev)
 	HDMI_DRV_LOG("leave hdmi_shutdown\n");
 }
 
+static const struct dev_pm_ops hdmi_pm_ops = {
+	.suspend = hdmi_suspend,
+};
+
 static struct platform_driver hdmi_driver = {
 	.probe = hdmi_probe,
 	.remove = hdmi_remove,
@@ -102,6 +106,7 @@ static struct platform_driver hdmi_driver = {
 	.driver = {
 		   .name = HDMI_DEVNAME,
 		   .owner = THIS_MODULE,
+		   .pm = &hdmi_pm_ops,
 		   .of_match_table = hdmi_of_ids,
 		   },
 };
@@ -194,6 +199,14 @@ int hdmi_force_hdren(HDMI_FORCE_HDR_ENABLE enhdr)
 	disp_hw_mgr_send_event(DISP_EVENT_FORCE_HDR, (void *)&enhdr);
 
 	return 0;
+}
+
+void suspend_display_callback(void)
+{
+#if defined(CONFIG_MTK_FB)
+	disp_hw_mgr_send_event(DISP_EVENT_PLUG_OUT, NULL);
+#endif
+	TX_DEF_LOG("[hdmi]deep sleep suspend display.\n");
 }
 
 void hdmi_state_callback(HDMI_STATE state)

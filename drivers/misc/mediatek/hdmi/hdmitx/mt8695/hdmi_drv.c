@@ -630,6 +630,32 @@ static int hdmi_internal_exit(void)
 	return 0;
 }
 
+/* hdmi_suspend is for registering of platform_driver */
+int hdmi_suspend(struct device *dev)
+{
+	int ret = 0;
+
+	TX_DEF_LOG("[hdmi]hdmi_suspend.\n");
+
+	if (r_hdmi_timer.function) {
+		ret = del_timer_sync(&r_hdmi_timer);
+		TX_DEF_LOG("[hdmi]delete r_hdmi_timer ret = %d.\n", ret);
+	}
+
+	memset((void *)&r_hdmi_timer, 0, sizeof(r_hdmi_timer));
+
+	vTxSignalOnOff(0);
+	if (hdmi_clockenable == 1) {
+		hdmi_clockenable = 0;
+		hdmi_clock_enable(false);
+	}
+	suspend_display_callback();
+
+	TX_DEF_LOG("[hdmi]hdmi_force_plug_out done.\n");
+
+	return 0;
+}
+
 /*----------------------------------------------------------------------------*/
 
 static void hdmi_internal_suspend(void)

@@ -29,6 +29,24 @@
 
 #ifdef CONFIG_MTU3_SUPPORT_Y_CABLE
 static bool lk_y_cable;
+static int  lk_usb_extconn;
+enum usb_extconn_type {
+	MT_USB_EXTCONN_UNKOWN = 0,
+	MT_USB_EXTCONN_STANDARDHOST = 1,
+	MT_USB_EXTCONN_CHARGINGHOST = 2,
+	MT_USB_EXTCONN_NONSTANDARDCHARGER = 3,
+	MT_USB_EXTCONN_STANDARDCHARGER = 4,
+	MT_USB_EXTCONN_MAXIMUM = 5,
+};
+
+const char *szusb_extconn_type[] = {
+	 "UNKNOWN LINE TYPE",
+	 "STANDARD_HOST",
+	 "CHARGING_HOST",
+	 "NONSTANDARD_CHARGER",
+	 "STANDARD_CHARGER",
+	 "INVALID PARAMETER",
+};
 #endif
 
 /* u2-port0 should be powered on and enabled; */
@@ -406,8 +424,20 @@ static int get_ssusb_rscs(struct platform_device *pdev, struct ssusb_mtk *ssusb)
 	if (lk_y_cable) {
 		dev_info(ssusb->dev, "pull dwon IDDIG function\n");
 		otg_sx->is_y_cable = true;
+	} else if (lk_usb_extconn != MT_USB_EXTCONN_STANDARDHOST) {
+		int line_type = lk_usb_extconn;
+
+		if (lk_usb_extconn > MT_USB_EXTCONN_MAXIMUM)
+			line_type = MT_USB_EXTCONN_MAXIMUM;
+
+		dev_info(ssusb->dev,
+			"Can't support extened connector line type: %s (%i)\n",
+			szusb_extconn_type[line_type],
+			lk_usb_extconn);
+		return -EPERM;
 	}
 	#endif
+
 	dev_info(dev, "dr_mode: %d, is_u3_dr: %d\n",
 		ssusb->dr_mode, otg_sx->is_u3_drd);
 
@@ -561,7 +591,22 @@ static int __init usb_y_cable_setup(char *str)
 
 	return 1;
 }
-__setup("y_cable=", usb_y_cable_setup);
+early_param("y_cable", usb_y_cable_setup);
+
+static int __init usb_line_type_setup(char *str)
+{
+	int ret = 0;
+
+	ret = get_option(&str, &lk_usb_extconn);
+	if (ret != 1) {
+		pr_info("usb_extconn = %i, Defaulting to device since ret: %i\n",
+				 lk_usb_extconn, ret);
+		lk_usb_extconn = MT_USB_EXTCONN_STANDARDHOST;
+	}
+
+	return 1;
+}
+early_param("usb_extconn", usb_line_type_setup);
 #endif
 
 /*

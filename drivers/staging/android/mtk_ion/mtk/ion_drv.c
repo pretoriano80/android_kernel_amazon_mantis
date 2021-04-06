@@ -444,6 +444,9 @@ static long ion_sys_ioctl(struct ion_client *client, unsigned int cmd,
 	else
 		ret_copy = copy_from_user(&param, (void __user *)arg, sizeof(struct ion_sys_data));
 
+	if (ret_copy)
+		return -EINVAL;
+
 	switch (param.sys_cmd) {
 	case ION_SYS_CACHE_SYNC:
 		ret = ion_sys_cache_sync(client, &param.cache_sync_param, from_kernel);
@@ -512,6 +515,10 @@ static long ion_sys_ioctl(struct ion_client *client, unsigned int cmd,
 		*(struct ion_sys_data *)arg = param;
 	else
 		ret_copy = copy_to_user((void __user *)arg, &param, sizeof(struct ion_sys_data));
+
+	if (ret_copy)
+		return -EINVAL;
+
 	ION_FUNC_LEAVE;
 	return ret;
 }

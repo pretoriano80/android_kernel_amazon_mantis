@@ -241,6 +241,8 @@ extern void hdmi_read(unsigned int u2Reg, unsigned int *p4Data);
 extern void hdmi_write(unsigned int u2Reg, unsigned int u4Data);
 extern void HDMI_EnableIrq(void);
 extern void hdmi_parse_videolfb(struct device *dev);
+extern int hdmi_suspend(struct device *dev);
+extern void suspend_display_callback(void);
 void hdmi_drvlog_enable(unsigned int enable);
 void dbg_wakeup_hdmi_irqwq(void);
 extern struct semaphore hdmi_update_mutex;
