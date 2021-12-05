@@ -3084,15 +3084,18 @@ static int vdp_routine(void *data)
 			if (layer_info->secure_en) {
 				struct dispfmt_setting dispfmt_info = {0};
 				uint64_t *reg_mode = NULL;
+				char *au4Reg = NULL;
 
-				dispfmt_info.dispfmt_register_setting = (uint64_t)(uintptr_t)fmt_hal_get_sw_register(
+				au4Reg = fmt_hal_get_sw_register(
 					layer_info->layer_id,
 					&dispfmt_info.dispfmt_register_setting_size,
 					&reg_mode);
 
+				dispfmt_info.dispfmt_setting_handle = dispfmt_sec_create_share_mem_handle(
+								au4Reg,sizeof(union disp_fmt_union_t));
 				dispfmt_info.dispfmt_register_setting_mask = *reg_mode;
 
-				WARN_ON(dispfmt_info.dispfmt_register_setting == 0);
+				WARN_ON(au4Reg == 0);
 				/* default set VDP_HDR10PLUS_GRAPHIC_OVERLAY_FLAG false */
 				disp_vdp_sec_config(&config_info, &dispfmt_info, VDP_HDR10PLUS_VISF_TIMING_MODE);
 				/* clear dispfmt register mask */

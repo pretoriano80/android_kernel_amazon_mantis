@@ -146,7 +146,8 @@ extern unsigned int vdp_dbg_level;
 #define VDP_SERVICE_CALL_FAIL		-11
 #define VDP_DESTROY_SESSION_FAIL	-12
 #define VDP_COPY_HDR10_PLUS_META_FAIL	-13
-
+#define DISPFMT_TZ_MEM_HANDLE_FAIL	-14
+#define DISPFMT_TZ_MEM_SESSION_FAIL	-15
 
 #define VDP_NO_ION_FD			((int)(~0U>>1))
 
