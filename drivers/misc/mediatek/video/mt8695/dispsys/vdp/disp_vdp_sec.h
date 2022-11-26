@@ -57,12 +57,12 @@ struct tz_disp_hw_common_info {
 
 
 struct dispfmt_setting {
-	uint64_t dispfmt_register_setting; /* char * buffer ptr */
+	uint32_t dispfmt_setting_handle;
 	int dispfmt_register_setting_size;
 	uint64_t dispfmt_register_setting_mask;
 };
 
-
+int dispfmt_sec_create_share_mem_handle(char * dispfmt_share_mem, int size);
 int disp_vdp_sec_init(unsigned int layer_id, uint32_t normal_mva, int normal_mva_size);
 int disp_vdp_sec_deinit(unsigned int layer_id);
 int disp_vdp_sec_config(struct vdp_hal_config_info *config_info,

@@ -244,8 +244,8 @@ static struct oz_pd *oz_connect_req(struct oz_pd *cur_pd, struct oz_elt *elt,
 	pd->pulse_period = ktime_set(OZ_QUANTUM / MSEC_PER_SEC, (OZ_QUANTUM %
 					MSEC_PER_SEC) * NSEC_PER_MSEC);
 /*
- *Overwrite the presleep value coming from Gelato. Nefario is 0x23 anyways.
- *This change has to be reverted when the firmware of Gelato changes.
+ *Overwrite the presleep value coming from abc123. abc123 is 0x23 anyways.
+ *This change has to be reverted when the firmware of abc123 changes.
  *This is helps to reduce the probability of DFU's fasle postivie cases.
  */
 	body->presleep = OZ_PRESLEEP;

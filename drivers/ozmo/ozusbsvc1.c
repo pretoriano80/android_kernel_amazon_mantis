@@ -344,13 +344,13 @@ void oz_usb_handle_ep_data(struct oz_usb_ctx *usb_ctx,
 					data, body->unit_size);
 				/*
 				 * Get battery level from the last byte of HID report.
-				 * Nefario attach the battery level to the end of HID report.
-				 * But Gelato sends an independent report for battery level.
+				 * abc123 attach the battery level to the end of HID report.
+				 * But abc123 sends an independent report for battery level.
 				 * Dumping the HID report, the fist byte of reports containing
 				 * batter level is 0x01 or 0x03, according to this obersation,
 				 * only update battery level when receive such HID report starting
-				 * with 0x01 and 0x03. Changes are needed in Gelato/Nefario FW side
-				 * to exhibite consistent behavior between Nefario and Gelato,
+				 * with 0x01 and 0x03. Changes are needed in abc123/abc123 FW side
+				 * to exhibite consistent behavior between abc123 and abc123,
 				 * attaching the battery level to the end of each HID report.
 				 */
 				if (((unsigned) *data == 0x01) || ((unsigned) *data == 0x03))

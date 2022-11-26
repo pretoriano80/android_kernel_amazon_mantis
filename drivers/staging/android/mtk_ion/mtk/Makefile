@@ -11,7 +11,7 @@
 # GNU General Public License for more details.
 #
 
-obj-$(CONFIG_MTK_ION) += ion_drv.o ion_mm_heap.o ion_fb_heap.o ion_sec_heap.o compat_ion.c
+obj-$(CONFIG_MTK_ION) += ion_drv.o ion_mm_heap.o ion_sec_heap.o compat_ion.c
 ifdef CONFIG_COMPAT
 obj-$(CONFIG_MTK_ION) += compat_ion.o
 endif

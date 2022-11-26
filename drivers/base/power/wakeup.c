@@ -879,6 +879,10 @@ bool pm_wakeup_pending(void)
 	unsigned long flags;
 	bool ret = false;
 
+#ifdef CONFIG_PM_SKIP_PENDING_WAKEUP
+	return ret;
+#endif
+
 	spin_lock_irqsave(&events_lock, flags);
 	if (events_check_enabled) {
 		unsigned int cnt, inpr;

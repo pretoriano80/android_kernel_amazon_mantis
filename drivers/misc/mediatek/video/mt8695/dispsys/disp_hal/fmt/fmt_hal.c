@@ -2127,7 +2127,16 @@ int32_t fmt_hal_h_down_enable(uint32_t fmt_id, struct fmt_hd_scl_info *info)
 
 	FMT_LOG_D("[DOWNSCL]out_h_s: %d, out_h_e: %d\n", info->vdout_out_h_start, info->vdout_out_h_end);
 
-	if (info->src_w <= 1920)
+	/*
+	 * for main video :
+	 * if video with <= 1920, not full fifo = 0, use full fifo
+	 * if video with > 1920, not full fifo = 1, not use full fifo
+	 * for sub video :
+	 * if video with < 1920, not full fifo = 0, use full fifo
+	 * if video with >= 1920, not full fifo = 1, not use full fifo
+	 */
+	if ((info->src_w < 1920) ||
+		((info->src_w == 1920) && (fmt_id == DISP_FMT_MAIN)))
 		_fmt_hd_scl_enable(fmt_id, factor, true, false);
 	else
 		_fmt_hd_scl_enable(fmt_id, factor, true, true);

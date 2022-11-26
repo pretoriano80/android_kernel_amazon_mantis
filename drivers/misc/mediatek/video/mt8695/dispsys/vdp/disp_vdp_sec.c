@@ -28,6 +28,8 @@
 
 #if VIDEO_DISPLAY_SECURE_ENABLE
 static KREE_SESSION_HANDLE vdp_session;
+static KREE_SESSION_HANDLE dispfmt_tz_mem_session;
+static KREE_SHAREDMEM_HANDLE dispfmt_tz_mem_handle;
 
 /* static struct hdr_share_memory_struct gShareMemory; */
 static int _vdp_sec_create_session(void)
@@ -46,6 +48,49 @@ static int _vdp_sec_create_session(void)
 	} while (0);
 
 	return VDP_OK;
+}
+
+int dispfmt_sec_create_share_mem_session(void)
+{
+	int status = 0;
+	TZ_RESULT ret;
+
+	do {
+		if (dispfmt_tz_mem_session == 0) {
+			ret = KREE_CreateSession(TZ_TA_MEM_UUID, &dispfmt_tz_mem_session);
+			if (ret != TZ_RESULT_SUCCESS) {
+				DISP_LOG_E("create dispfmt_tz_mem_session fail:%d\n", ret);
+				status = DISPFMT_TZ_MEM_SESSION_FAIL;
+				break;
+			}
+		}
+	} while (0);
+
+	return status;
+}
+
+int dispfmt_sec_create_share_mem_handle(char *dispfmt_share_mem, int size)
+{
+	KREE_SHAREDMEM_PARAM dispfmt_param;
+	TZ_RESULT ret;
+
+	dispfmt_param.buffer = (void *)dispfmt_share_mem;
+	dispfmt_param.size = size;
+
+	do {
+		if (dispfmt_tz_mem_handle == 0) {
+			ret = KREE_RegisterSharedmem(dispfmt_tz_mem_session,
+			&dispfmt_tz_mem_handle,
+			&dispfmt_param);
+			if (ret != TZ_RESULT_SUCCESS) {
+				DISP_LOG_E("create dispfmt_tz_mem_handle fail:%d\n", ret);
+				return  DISPFMT_TZ_MEM_HANDLE_FAIL;
+				break;
+			}
+		}
+	} while (0);
+
+	return dispfmt_tz_mem_handle;
 }
 
 #if 0
@@ -74,7 +119,16 @@ int disp_vdp_sec_init(unsigned int layer_id, uint32_t normal_mva, int normal_mva
 	struct vdp_sec_init_info init_info;
 
 	ret = _vdp_sec_create_session();
+	if (ret != VDP_OK) {
+		DISP_LOG_E("VDP create session fail: ret[%d]\n", ret);
+		return ret;
+	}
 
+	ret = dispfmt_sec_create_share_mem_session();
+	if (ret != VDP_OK) {
+		DISP_LOG_E("dispfmt create share memory session fail: ret[%d]\n", ret);
+		return ret;
+	}
 	do {
 		fmt_hal_set_secure(layer_id, true);
 		/* fill vdp_sec_init_info structure. */
