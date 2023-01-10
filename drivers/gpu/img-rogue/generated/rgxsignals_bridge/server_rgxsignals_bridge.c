@@ -71,6 +71,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Server-side bridge entry points
  */
  
+
+
+
 static IMG_INT
 PVRSRVBridgeRGXNotifySignalUpdate(IMG_UINT32 ui32DispatchTableEntry,
 					  PVRSRV_BRIDGE_IN_RGXNOTIFYSIGNALUPDATE *psRGXNotifySignalUpdateIN,
@@ -142,7 +145,7 @@ RGXNotifySignalUpdate_exit:
 
 				{
 					/* Unreference the previously looked up handle */
-					if(hPrivDataInt)
+					if (hPrivDataInt)
 					{
 						PVRSRVReleaseHandleUnlocked(psConnection->psHandleBase,
 										hPrivData,

@@ -70,6 +70,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Server-side bridge entry points
  */
  
+
+
+
 static IMG_INT
 PVRSRVBridgeCacheOpQueue(IMG_UINT32 ui32DispatchTableEntry,
 					  PVRSRV_BRIDGE_IN_CACHEOPQUEUE *psCacheOpQueueIN,
@@ -89,18 +92,27 @@ PVRSRVBridgeCacheOpQueue(IMG_UINT32 ui32DispatchTableEntry,
 	IMG_BOOL bHaveEnoughSpace = IMG_FALSE;
 #endif
 
-	IMG_UINT32 ui32BufferSize = 
-			(psCacheOpQueueIN->ui32NumCacheOps * sizeof(PMR *)) +
-			(psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_HANDLE)) +
-			(psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_UINT64)) +
-			(psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_DEVMEM_OFFSET_T)) +
-			(psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_DEVMEM_SIZE_T)) +
-			(psCacheOpQueueIN->ui32NumCacheOps * sizeof(PVRSRV_CACHE_OP)) +
+	IMG_UINT32 ui32BufferSize = 0;
+	IMG_UINT64 ui64BufferSize =
+			((IMG_UINT64) psCacheOpQueueIN->ui32NumCacheOps * sizeof(PMR *)) +
+			((IMG_UINT64) psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_HANDLE)) +
+			((IMG_UINT64) psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_UINT64)) +
+			((IMG_UINT64) psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_DEVMEM_OFFSET_T)) +
+			((IMG_UINT64) psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_DEVMEM_SIZE_T)) +
+			((IMG_UINT64) psCacheOpQueueIN->ui32NumCacheOps * sizeof(PVRSRV_CACHE_OP)) +
 			0;
 
 
 
 
+
+	if (ui64BufferSize > IMG_UINT32_MAX)
+	{
+		psCacheOpQueueOUT->eError = PVRSRV_ERROR_BRIDGE_BUFFER_TOO_SMALL;
+		goto CacheOpQueue_exit;
+	}
+
+	ui32BufferSize = (IMG_UINT32) ui64BufferSize;
 
 	if (ui32BufferSize != 0)
 	{
@@ -133,6 +145,7 @@ PVRSRVBridgeCacheOpQueue(IMG_UINT32 ui32DispatchTableEntry,
 	if (psCacheOpQueueIN->ui32NumCacheOps != 0)
 	{
 		psPMRInt = (PMR **)(((IMG_UINT8 *)pArrayArgsBuffer) + ui32NextOffset);
+		OSCachedMemSet(psPMRInt, 0, psCacheOpQueueIN->ui32NumCacheOps * sizeof(PMR *));
 		ui32NextOffset += psCacheOpQueueIN->ui32NumCacheOps * sizeof(PMR *);
 		hPMRInt2 = (IMG_HANDLE *)(((IMG_UINT8 *)pArrayArgsBuffer) + ui32NextOffset); 
 		ui32NextOffset += psCacheOpQueueIN->ui32NumCacheOps * sizeof(IMG_HANDLE);
@@ -279,7 +292,7 @@ CacheOpQueue_exit:
 		{
 				{
 					/* Unreference the previously looked up handle */
-					if(hPMRInt2[i])
+					if (psPMRInt[i])
 					{
 						PVRSRVReleaseHandleUnlocked(psConnection->psHandleBase,
 										hPMRInt2[i],
@@ -292,7 +305,10 @@ CacheOpQueue_exit:
 	UnlockHandle();
 
 	/* Allocated space should be equal to the last updated offset */
-	PVR_ASSERT(ui32BufferSize == ui32NextOffset);
+#ifdef PVRSRV_NEED_PVR_ASSERT
+	if(psCacheOpQueueOUT->eError == PVRSRV_OK)
+		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
+#endif /* PVRSRV_NEED_PVR_ASSERT */
 
 #if defined(INTEGRITY_OS)
 	if(pArrayArgsBuffer)
@@ -304,6 +320,9 @@ CacheOpQueue_exit:
 
 	return 0;
 }
+
+
+
 
 
 static IMG_INT
@@ -368,7 +387,7 @@ CacheOpExec_exit:
 
 				{
 					/* Unreference the previously looked up handle */
-					if(psPMRInt)
+					if (psPMRInt)
 					{
 						PVRSRVReleaseHandleUnlocked(psConnection->psHandleBase,
 										hPMR,
@@ -381,6 +400,9 @@ CacheOpExec_exit:
 
 	return 0;
 }
+
+
+
 
 
 static IMG_INT
@@ -449,7 +471,7 @@ CacheOpLog_exit:
 
 				{
 					/* Unreference the previously looked up handle */
-					if(psPMRInt)
+					if (psPMRInt)
 					{
 						PVRSRVReleaseHandleUnlocked(psConnection->psHandleBase,
 										hPMR,
@@ -462,6 +484,9 @@ CacheOpLog_exit:
 
 	return 0;
 }
+
+
+
 
 
 static IMG_INT
@@ -531,6 +556,9 @@ CacheOpAcquireInfoPage_exit:
 }
 
 
+
+
+
 static IMG_INT
 PVRSRVBridgeCacheOpReleaseInfoPage(IMG_UINT32 ui32DispatchTableEntry,
 					  PVRSRV_BRIDGE_IN_CACHEOPRELEASEINFOPAGE *psCacheOpReleaseInfoPageIN,
@@ -554,7 +582,7 @@ PVRSRVBridgeCacheOpReleaseInfoPage(IMG_UINT32 ui32DispatchTableEntry,
 
 
 	psCacheOpReleaseInfoPageOUT->eError =
-		PVRSRVReleaseHandleUnlocked(psConnection->psProcessHandleBase->psHandleBase,
+		PVRSRVDestroyHandleUnlocked(psConnection->psProcessHandleBase->psHandleBase,
 					(IMG_HANDLE) psCacheOpReleaseInfoPageIN->hPMR,
 					PVRSRV_HANDLE_TYPE_DEVMEM_MEM_IMPORT);
 	if ((psCacheOpReleaseInfoPageOUT->eError != PVRSRV_OK) &&

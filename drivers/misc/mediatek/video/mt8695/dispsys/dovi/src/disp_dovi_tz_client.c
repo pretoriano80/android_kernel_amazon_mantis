@@ -302,7 +302,7 @@ enum dovi_status dovi_sec_share_memory_init(void)
 	}
 
 	status = dovi_sec_share_mem_service_call(DOVI_TZ_CALL_CMD_SHARE_MEMORY_INIT,
-				       DOVI_TZ_CALL_DIR_MEMREF_INOUT,
+				       DOVI_TZ_CALL_DIR_MEMREF_INPUT,
 				       (void *)&dovi_tz_mem_handle,
 				       size);
 
@@ -443,33 +443,12 @@ enum dovi_status dovi_sec_debug_level_init(uint32_t dovi_log_level)
 
 	dovi_share_mem->log_level = dovi_log_level;
 	status = dovi_sec_share_mem_service_call(DOVI_TZ_CALL_CMD_DEBUG_LEVEL_INIT,
-					DOVI_TZ_CALL_DIR_MEMREF_INOUT,
+					DOVI_TZ_CALL_DIR_MEMREF_INPUT,
 					(void *)p_dovi_share_mem_handle,
 					size);
 
 	if (status != DOVI_STATUS_OK)
 		dovi_error("init debug level init fail [%d]\n", status);
-
-	return status;
-}
-
-enum dovi_status dovi_sec_sec_handle_copy(uint32_t *sec_handle, uint32_t len)
-{
-	enum dovi_status status = DOVI_STATUS_OK;
-	uint32_t size = sizeof(struct dovi_share_memory_info_t);
-	char *p_dovi_share_mem_handle = (char *) &dovi_tz_mem_handle;
-
-	dovi_share_mem->sec_handle_in = *sec_handle;
-	dovi_share_mem->sec_handle_len = len;
-	status = dovi_sec_share_mem_service_call(DOVI_TZ_CALL_CMD_SEC_MEM_COPY,
-					DOVI_TZ_CALL_DIR_MEMREF_INOUT,
-					(void *)p_dovi_share_mem_handle,
-					size);
-
-	if (status != DOVI_STATUS_OK)
-		dovi_error("dovi_sec_sec_handle_copy fail [%d]\n", status);
-
-	*sec_handle = dovi_share_mem->sec_handle_out;
 
 	return status;
 }

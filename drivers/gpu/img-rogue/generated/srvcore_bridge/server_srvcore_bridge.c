@@ -70,6 +70,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Server-side bridge entry points
  */
  
+
+
+
 static IMG_INT
 PVRSRVBridgeConnect(IMG_UINT32 ui32DispatchTableEntry,
 					  PVRSRV_BRIDGE_IN_CONNECT *psConnectIN,
@@ -106,6 +109,9 @@ PVRSRVBridgeConnect(IMG_UINT32 ui32DispatchTableEntry,
 }
 
 
+
+
+
 static IMG_INT
 PVRSRVBridgeDisconnect(IMG_UINT32 ui32DispatchTableEntry,
 					  PVRSRV_BRIDGE_IN_DISCONNECT *psDisconnectIN,
@@ -135,6 +141,9 @@ PVRSRVBridgeDisconnect(IMG_UINT32 ui32DispatchTableEntry,
 
 	return 0;
 }
+
+
+
 
 
 static IMG_INT
@@ -204,6 +213,9 @@ AcquireGlobalEventObject_exit:
 }
 
 
+
+
+
 static IMG_INT
 PVRSRVBridgeReleaseGlobalEventObject(IMG_UINT32 ui32DispatchTableEntry,
 					  PVRSRV_BRIDGE_IN_RELEASEGLOBALEVENTOBJECT *psReleaseGlobalEventObjectIN,
@@ -227,7 +239,7 @@ PVRSRVBridgeReleaseGlobalEventObject(IMG_UINT32 ui32DispatchTableEntry,
 
 
 	psReleaseGlobalEventObjectOUT->eError =
-		PVRSRVReleaseHandleUnlocked(psConnection->psHandleBase,
+		PVRSRVDestroyHandleUnlocked(psConnection->psHandleBase,
 					(IMG_HANDLE) psReleaseGlobalEventObjectIN->hGlobalEventObject,
 					PVRSRV_HANDLE_TYPE_SHARED_EVENT_OBJECT);
 	if ((psReleaseGlobalEventObjectOUT->eError != PVRSRV_OK) &&
@@ -252,6 +264,9 @@ ReleaseGlobalEventObject_exit:
 
 	return 0;
 }
+
+
+
 
 
 static IMG_INT
@@ -341,7 +356,7 @@ EventObjectOpen_exit:
 
 				{
 					/* Unreference the previously looked up handle */
-					if(hEventObjectInt)
+					if (hEventObjectInt)
 					{
 						PVRSRVReleaseHandleUnlocked(psConnection->psHandleBase,
 										hEventObject,
@@ -362,6 +377,9 @@ EventObjectOpen_exit:
 
 	return 0;
 }
+
+
+
 
 
 static IMG_INT
@@ -422,7 +440,7 @@ EventObjectWait_exit:
 
 				{
 					/* Unreference the previously looked up handle */
-					if(hOSEventKMInt)
+					if (hOSEventKMInt)
 					{
 						PVRSRVReleaseHandleUnlocked(psConnection->psHandleBase,
 										hOSEventKM,
@@ -435,6 +453,9 @@ EventObjectWait_exit:
 
 	return 0;
 }
+
+
+
 
 
 static IMG_INT
@@ -460,7 +481,7 @@ PVRSRVBridgeEventObjectClose(IMG_UINT32 ui32DispatchTableEntry,
 
 
 	psEventObjectCloseOUT->eError =
-		PVRSRVReleaseHandleUnlocked(psConnection->psHandleBase,
+		PVRSRVDestroyHandleUnlocked(psConnection->psHandleBase,
 					(IMG_HANDLE) psEventObjectCloseIN->hOSEventKM,
 					PVRSRV_HANDLE_TYPE_EVENT_OBJECT_CONNECT);
 	if ((psEventObjectCloseOUT->eError != PVRSRV_OK) &&
@@ -485,6 +506,9 @@ EventObjectClose_exit:
 
 	return 0;
 }
+
+
+
 
 
 static IMG_INT
@@ -514,6 +538,9 @@ PVRSRVBridgeDumpDebugInfo(IMG_UINT32 ui32DispatchTableEntry,
 
 	return 0;
 }
+
+
+
 
 
 static IMG_INT
@@ -546,6 +573,9 @@ PVRSRVBridgeGetDevClockSpeed(IMG_UINT32 ui32DispatchTableEntry,
 }
 
 
+
+
+
 static IMG_INT
 PVRSRVBridgeHWOpTimeout(IMG_UINT32 ui32DispatchTableEntry,
 					  PVRSRV_BRIDGE_IN_HWOPTIMEOUT *psHWOpTimeoutIN,
@@ -576,6 +606,9 @@ PVRSRVBridgeHWOpTimeout(IMG_UINT32 ui32DispatchTableEntry,
 }
 
 
+
+
+
 static IMG_INT
 PVRSRVBridgeAlignmentCheck(IMG_UINT32 ui32DispatchTableEntry,
 					  PVRSRV_BRIDGE_IN_ALIGNMENTCHECK *psAlignmentCheckIN,
@@ -590,13 +623,22 @@ PVRSRVBridgeAlignmentCheck(IMG_UINT32 ui32DispatchTableEntry,
 	IMG_BOOL bHaveEnoughSpace = IMG_FALSE;
 #endif
 
-	IMG_UINT32 ui32BufferSize = 
-			(psAlignmentCheckIN->ui32AlignChecksSize * sizeof(IMG_UINT32)) +
+	IMG_UINT32 ui32BufferSize = 0;
+	IMG_UINT64 ui64BufferSize =
+			((IMG_UINT64) psAlignmentCheckIN->ui32AlignChecksSize * sizeof(IMG_UINT32)) +
 			0;
 
 
 
 
+
+	if (ui64BufferSize > IMG_UINT32_MAX)
+	{
+		psAlignmentCheckOUT->eError = PVRSRV_ERROR_BRIDGE_BUFFER_TOO_SMALL;
+		goto AlignmentCheck_exit;
+	}
+
+	ui32BufferSize = (IMG_UINT32) ui64BufferSize;
 
 	if (ui32BufferSize != 0)
 	{
@@ -657,7 +699,10 @@ AlignmentCheck_exit:
 
 
 	/* Allocated space should be equal to the last updated offset */
-	PVR_ASSERT(ui32BufferSize == ui32NextOffset);
+#ifdef PVRSRV_NEED_PVR_ASSERT
+	if(psAlignmentCheckOUT->eError == PVRSRV_OK)
+		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
+#endif /* PVRSRV_NEED_PVR_ASSERT */
 
 #if defined(INTEGRITY_OS)
 	if(pArrayArgsBuffer)
@@ -669,6 +714,9 @@ AlignmentCheck_exit:
 
 	return 0;
 }
+
+
+
 
 
 static IMG_INT
@@ -699,6 +747,9 @@ PVRSRVBridgeGetDeviceStatus(IMG_UINT32 ui32DispatchTableEntry,
 
 	return 0;
 }
+
+
+
 
 
 static IMG_INT
@@ -760,7 +811,7 @@ EventObjectWaitTimeout_exit:
 
 				{
 					/* Unreference the previously looked up handle */
-					if(hOSEventKMInt)
+					if (hOSEventKMInt)
 					{
 						PVRSRVReleaseHandleUnlocked(psConnection->psHandleBase,
 										hOSEventKM,
@@ -773,6 +824,9 @@ EventObjectWaitTimeout_exit:
 
 	return 0;
 }
+
+
+
 
 
 static IMG_INT
@@ -789,8 +843,9 @@ PVRSRVBridgeFindProcessMemStats(IMG_UINT32 ui32DispatchTableEntry,
 	IMG_BOOL bHaveEnoughSpace = IMG_FALSE;
 #endif
 
-	IMG_UINT32 ui32BufferSize = 
-			(psFindProcessMemStatsIN->ui32ArrSize * sizeof(IMG_UINT32)) +
+	IMG_UINT32 ui32BufferSize = 0;
+	IMG_UINT64 ui64BufferSize =
+			((IMG_UINT64) psFindProcessMemStatsIN->ui32ArrSize * sizeof(IMG_UINT32)) +
 			0;
 
 
@@ -798,6 +853,14 @@ PVRSRVBridgeFindProcessMemStats(IMG_UINT32 ui32DispatchTableEntry,
 
 	psFindProcessMemStatsOUT->pui32MemStatsArray = psFindProcessMemStatsIN->pui32MemStatsArray;
 
+
+	if (ui64BufferSize > IMG_UINT32_MAX)
+	{
+		psFindProcessMemStatsOUT->eError = PVRSRV_ERROR_BRIDGE_BUFFER_TOO_SMALL;
+		goto FindProcessMemStats_exit;
+	}
+
+	ui32BufferSize = (IMG_UINT32) ui64BufferSize;
 
 	if (ui32BufferSize != 0)
 	{
@@ -841,6 +904,11 @@ PVRSRVBridgeFindProcessMemStats(IMG_UINT32 ui32DispatchTableEntry,
 					psFindProcessMemStatsIN->ui32ArrSize,
 					psFindProcessMemStatsIN->bbAllProcessStats,
 					pui32MemStatsArrayInt);
+	/* Exit early if bridged call fails */
+	if(psFindProcessMemStatsOUT->eError != PVRSRV_OK)
+	{
+		goto FindProcessMemStats_exit;
+	}
 
 
 
@@ -861,7 +929,10 @@ FindProcessMemStats_exit:
 
 
 	/* Allocated space should be equal to the last updated offset */
-	PVR_ASSERT(ui32BufferSize == ui32NextOffset);
+#ifdef PVRSRV_NEED_PVR_ASSERT
+	if(psFindProcessMemStatsOUT->eError == PVRSRV_OK)
+		PVR_ASSERT(ui32BufferSize == ui32NextOffset);
+#endif /* PVRSRV_NEED_PVR_ASSERT */
 
 #if defined(INTEGRITY_OS)
 	if(pArrayArgsBuffer)

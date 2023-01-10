@@ -59,6 +59,11 @@
 #define CUSTOM_KEY4	0xA4
 #define VOICE_VIEW_KEY  0xA5
 #define MAGNIFIER_KEY   0xA6
+#define CONSUMER_PRESET_1_KEY 0x27e
+#define CONSUMER_PRESET_2_KEY 0x27f
+#define CONSUMER_AUTO_PAIR_KEY 0x280
+#define CONSUMER_SETTINGS_KEY  0x33
+#define CONSUMER_METRIC_VIRTUAL_KEY 0x230
 
 
 #define CUSTOM_APP1	0x2e9
@@ -67,6 +72,11 @@
 #define CUSTOM_APP4	0x2eb
 #define VOICE_VIEW_APP  0x246
 #define MAGNIFIER_APP   0x174
+#define CONSUMER_PRESET_1 0x27e
+#define CONSUMER_PRESET_2 0x27f
+#define CONSUMER_AUTO_PAIR 0x280
+#define CONSUMER_SETTINGS  0x2ee
+#define CONSUMER_METRIC_VIRTUAL 0x2ff /* KEY_MAX */
 
 /* Debug feature to trace audio packets being received */
 #define DEBUG_AUDIO_RECEPTION 1
@@ -658,6 +668,21 @@ static int ftv_remote_input_mapping(struct hid_device *hdev,
 		case REL_HWHEEL_USAGE:
 			dbg_hid("Ignore ABS_VOLUME and REL_HWHEEL\n");
 			return -1;
+		case CONSUMER_PRESET_1_KEY:
+			hid_map_usage_clear(hi, usage, bit, max, EV_KEY, CONSUMER_PRESET_1);
+			return 1;
+		case CONSUMER_PRESET_2_KEY:
+			hid_map_usage_clear(hi, usage, bit, max, EV_KEY, CONSUMER_PRESET_2);
+			return 1;
+		case CONSUMER_AUTO_PAIR_KEY:
+			hid_map_usage_clear(hi, usage, bit, max, EV_KEY, CONSUMER_AUTO_PAIR);
+			return 1;
+		case CONSUMER_SETTINGS_KEY:
+			hid_map_usage_clear(hi, usage, bit, max, EV_KEY, CONSUMER_SETTINGS);
+			return 1;
+		case CONSUMER_METRIC_VIRTUAL_KEY:
+			hid_map_usage_clear(hi, usage, bit, max, EV_KEY, CONSUMER_METRIC_VIRTUAL);
+			return 1;
 		default:
 			break;
 		}

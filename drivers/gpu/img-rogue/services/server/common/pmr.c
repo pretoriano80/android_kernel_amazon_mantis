@@ -222,7 +222,12 @@ struct _PMR_
      */
     IMG_BOOL bSparseAlloc;
 
-    /* Minimum Physical Contiguity Guarantee.  Might be called "page
+	/* Indicates whether this PMR has been unpinned.
+     * By default, all PMRs are pinned at creation.
+     */
+    IMG_BOOL bIsUnpinned;
+
+	/* Minimum Physical Contiguity Guarantee.  Might be called "page
        size", but that would be incorrect, as page size is something
        meaningful only in virtual realm.  This contiguity guarantee
        provides an inequality that can be verified/asserted/whatever
@@ -392,13 +397,6 @@ _PMRCreate(PMR_SIZE_T uiLogicalSize,
 	psPMR = (PMR *) pvPMRLinAddr;
 	psMappingTable = (PMR_MAPPING_TABLE *) (((IMG_CHAR *) pvPMRLinAddr) + sizeof(*psPMR));
 
-	eError = OSLockCreate(&psPMR->hLock, LOCK_TYPE_PASSIVE);
-	if (eError != PVRSRV_OK)
-	{
-		OSFreeMem(psPMR);
-		return eError;
-	}
-
 	/* Setup the mapping table */
 	psMappingTable->uiChunkSize = uiChunkSize;
 	psMappingTable->ui32NumVirtChunks = ui32NumVirtChunks;
@@ -408,18 +406,40 @@ _PMRCreate(PMR_SIZE_T uiLogicalSize,
 	for (i=0; i<ui32NumPhysChunks; i++)
 	{
 		ui32Temp = pui32MappingTable[i];
-		psMappingTable->aui32Translation[ui32Temp] = ui32Temp;
+		if (ui32Temp < ui32NumVirtChunks)
+		{
+			psMappingTable->aui32Translation[ui32Temp] = ui32Temp;
+		}
+		else
+		{
+			OSFreeMem(psPMR);
+			return PVRSRV_ERROR_PMR_INVALID_MAP_INDEX_ARRAY;
+		}
+	}
+
+	eError = OSLockCreate(&psPMR->hLock, LOCK_TYPE_PASSIVE);
+	if (eError != PVRSRV_OK)
+	{
+		OSFreeMem(psPMR);
+		return eError;
 	}
 
 	/* Setup the PMR */
 	OSAtomicWrite(&psPMR->iRefCount, 0);
-	OSAtomicWrite(&psPMR->iLockCount, 0);
+
+	/* If allocation is not made on demand, it will be backed now and
+	 * backing will not be removed until the PMR is destroyed, therefore
+	 * we can initialise the iLockCount to 1 rather than 0.
+	 */
+	OSAtomicWrite(&psPMR->iLockCount, (PVRSRV_CHECK_ON_DEMAND(uiFlags) ? 0 : 1));
+
 	psPMR->psContext = psContext;
 	psPMR->uiLogicalSize = uiLogicalSize;
 	psPMR->uiLog2ContiguityGuarantee = uiLog2ContiguityGuarantee;
 	psPMR->uiFlags = uiFlags;
 	psPMR->psMappingTable = psMappingTable;
 	psPMR->bSparseAlloc = bSparse;
+	psPMR->bIsUnpinned = IMG_FALSE;
 
 	psPMR->ui32PMRSignature = PMR_SIGNATURE_LIVE;
 
@@ -494,6 +514,8 @@ _UnrefAndMaybeDestroy(PMR *psPMR)
 
 #ifdef PVRSRV_NEED_PVR_ASSERT
 		PVR_ASSERT(OSAtomicRead(&psPMR->iLockCount) == 0);
+		/* If not backed on demand, iLockCount should be 1 otherwise it should be 0 */
+		PVR_ASSERT(OSAtomicRead(&psPMR->iLockCount) == (PVRSRV_CHECK_ON_DEMAND(psPMR->uiFlags) ? 0 : 1));
 #endif
 
 #if defined(PVR_RI_DEBUG)
@@ -657,8 +679,8 @@ PVRSRV_ERROR PMRLockSysPhysAddressesNested(PMR *psPMR,
     /* Also count locks separately from other types of references, to
        allow for debug assertions */
 
-    /* Only call callback if lockcount transitions from 0 to 1 */
-    if (OSAtomicIncrement(&psPMR->iLockCount) == 1)
+    /* Only call callback if lockcount transitions from 0 to 1 (or 1 to 2 if not backed on demand) */
+    if (OSAtomicIncrement(&psPMR->iLockCount) == (PVRSRV_CHECK_ON_DEMAND(psPMR->uiFlags) ? 1 : 2))
     {
         if (psPMR->psFuncTab->pfnLockPhysAddresses != NULL)
         {
@@ -672,10 +694,6 @@ PVRSRV_ERROR PMRLockSysPhysAddressesNested(PMR *psPMR,
                 goto e1;
             }
         }
-#if defined(PVR_RI_DEBUG)
-        /* Update RI debug to indicate that the PMR now has physical backing */
-        RIPMRPhysicalBackingKM(psPMR, IMG_TRUE);
-#endif
     }
 	OSLockRelease(psPMR->hLock);
 
@@ -714,9 +732,9 @@ PMRUnlockSysPhysAddressesNested(PMR *psPMR, IMG_UINT32 ui32NestingLevel)
 	 * an atomic operation
 	 */
 	OSLockAcquireNested(psPMR->hLock, ui32NestingLevel);
-	PVR_ASSERT(OSAtomicRead(&psPMR->iLockCount) > 0);
+	PVR_ASSERT(OSAtomicRead(&psPMR->iLockCount) > (PVRSRV_CHECK_ON_DEMAND(psPMR->uiFlags) ? 0 : 1));
 
-    if (OSAtomicDecrement(&psPMR->iLockCount) == 0)
+    if (OSAtomicDecrement(&psPMR->iLockCount) == (PVRSRV_CHECK_ON_DEMAND(psPMR->uiFlags) ? 0 : 1))
     {
         if (psPMR->psFuncTab->pfnUnlockPhysAddresses != NULL)
         {
@@ -726,10 +744,6 @@ PMRUnlockSysPhysAddressesNested(PMR *psPMR, IMG_UINT32 ui32NestingLevel)
             /* must never fail */
             PVR_ASSERT(eError == PVRSRV_OK);
         }
-#if defined(PVR_RI_DEBUG)
-        /* Update RI debug to indicate that the PMR no longer has physical backing */
-        RIPMRPhysicalBackingKM(psPMR, IMG_FALSE);
-#endif
     }
 
     OSLockRelease(psPMR->hLock);
@@ -769,6 +783,10 @@ PMRUnpinPMR(PMR *psPMR, IMG_BOOL bDevMapped)
 	if(psPMR->psFuncTab->pfnUnpinMem != NULL)
 	{
 		eError = psPMR->psFuncTab->pfnUnpinMem(psPMR->pvFlavourData);
+		if (eError == PVRSRV_OK)
+		{
+			psPMR->bIsUnpinned = IMG_TRUE;
+		}
 	}
 
 e_exit:
@@ -786,6 +804,10 @@ PMRPinPMR(PMR *psPMR)
 	{
 		eError = psPMR->psFuncTab->pfnPinMem(psPMR->pvFlavourData,
 											psPMR->psMappingTable);
+		if (eError == PVRSRV_OK)
+		{
+			psPMR->bIsUnpinned = IMG_FALSE;
+		}
 	}
 
 	return eError;
@@ -1668,9 +1690,16 @@ PMR_WriteBytes(PMR *psPMR,
 }
 
 PVRSRV_ERROR
-PMRMMapPMR(PMR *psPMR, PMR_MMAP_DATA pOSMMapData)
+PMRMMapPMR(PMR *psPMR, PMR_MMAP_DATA pOSMMapData, PVRSRV_MEMALLOCFLAGS_T uiFlags)
 {
 	_PMRAssert(psPMR);
+
+	if (!PVRSRV_CHECK_CPU_WRITEABLE(psPMR->uiFlags) &&
+	    PVRSRV_CHECK_CPU_WRITEABLE(uiFlags))
+	{
+		return PVRSRV_ERROR_PMR_NOT_PERMITTED;
+	}
+
 	if (psPMR->psFuncTab->pfnMMap)
 	{
 		return psPMR->psFuncTab->pfnMMap(psPMR->pvFlavourData, psPMR, pOSMMapData);
@@ -1737,6 +1766,31 @@ PMR_LogicalSize(const PMR *psPMR,
 
     *puiLogicalSize = psPMR->uiLogicalSize;
     return PVRSRV_OK;
+}
+
+PVRSRV_ERROR
+PMR_PhysicalSize(const PMR *psPMR,
+				 IMG_DEVMEM_SIZE_T *puiPhysicalSize)
+{
+	PVR_ASSERT(psPMR != NULL);
+
+	/* iLockCount will be > 0 for any backed PMR (backed on demand or not) */
+	if ((OSAtomicRead(&psPMR->iLockCount) > 0) && !psPMR->bIsUnpinned)
+	{
+		if (psPMR->bSparseAlloc)
+		{
+			*puiPhysicalSize = psPMR->psMappingTable->uiChunkSize * psPMR->psMappingTable->ui32NumPhysChunks;
+		}
+		else
+		{
+			*puiPhysicalSize = psPMR->uiLogicalSize;
+		}
+	}
+	else
+	{
+		*puiPhysicalSize = 0;
+	}
+	return PVRSRV_OK;
 }
 
 PHYS_HEAP *
@@ -1842,7 +1896,7 @@ PMR_DevPhysAddr(const PMR *psPMR,
 	PVR_ASSERT(psPMR->psFuncTab->pfnDevPhysAddr != NULL);
 
 #ifdef PVRSRV_NEED_PVR_ASSERT
-	PVR_ASSERT(OSAtomicRead(&psPMR->iLockCount) > 0);
+	PVR_ASSERT(OSAtomicRead(&psPMR->iLockCount) > (PVRSRV_CHECK_ON_DEMAND(psPMR->uiFlags) ? 0 : 1));
 #endif
 
 	if (ui32NumOfPages > PMR_MAX_TRANSLATION_STACK_ALLOC)
@@ -1850,8 +1904,7 @@ PMR_DevPhysAddr(const PMR *psPMR,
 		puiPhysicalOffset = OSAllocMem(ui32NumOfPages * sizeof(IMG_DEVMEM_OFFSET_T));
 		if (puiPhysicalOffset == NULL)
 		{
-			eError = PVRSRV_ERROR_OUT_OF_MEMORY;
-			goto e0;
+			return PVRSRV_ERROR_OUT_OF_MEMORY;
 		}
 	}
 
@@ -1871,11 +1924,18 @@ PMR_DevPhysAddr(const PMR *psPMR,
 												  puiPhysicalOffset,
 												  pbValid,
 												  psDevAddrPtr);
-#if defined(PVR_PMR_TRANSLATE_UMA_ADDRESSES)
-    /* Currently excluded from the default build because of performance concerns.
-     * We do not need this part in all systems because the GPU has the same address view of system RAM as the CPU.
-     * Alternatively this could be implemented as part of the PMR-factories directly */
+		if (eError != PVRSRV_OK)
+		{
+			goto FreeOffsetArray;
+		}
 
+#if defined(PVR_PMR_TRANSLATE_UMA_ADDRESSES)
+		/* Currently excluded from the default build because of performance
+		 * concerns.
+		 * We do not need this part in all systems because the GPU has the same
+		 * address view of system RAM as the CPU.
+		 * Alternatively this could be implemented as part of the PMR-factories
+		 * directly */
 		if (PhysHeapGetType(psPMR->psPhysHeap) == PHYS_HEAP_TYPE_UMA ||
 		    PhysHeapGetType(psPMR->psPhysHeap) == PHYS_HEAP_TYPE_DMA)
 		{
@@ -1896,20 +1956,12 @@ PMR_DevPhysAddr(const PMR *psPMR,
 #endif
 	}
 
+FreeOffsetArray:
 	if (puiPhysicalOffset != auiPhysicalOffset)
 	{
 		OSFreeMem(puiPhysicalOffset);
 	}
 
-    if (eError != PVRSRV_OK)
-    {
-        goto e0;
-    }
-
-    return PVRSRV_OK;
-
- e0:
-    PVR_ASSERT(eError != PVRSRV_OK);
     return eError;
 }
 

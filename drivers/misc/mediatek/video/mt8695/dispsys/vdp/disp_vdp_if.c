@@ -193,10 +193,6 @@ static size_t vdp_ion_phys_mmu_addr(struct ion_client *client, struct ion_handle
 
 	ion_phys(client, handle, (ion_phys_addr_t *) mva, &size);
 
-#ifdef CONFIG_MTK_CLI_DEBUG_SUPPORT
-	if (vdp_cli_get()->enable_mva_debug)
-		DISP_LOG_E("mva[0x%08x] va:[%p]\n", *mva, ion_map_kernel(client, handle));
-#endif
 	return size;
 }
 
@@ -1238,6 +1234,11 @@ int disp_vdp_config(struct mtk_disp_buffer *config, struct disp_hw_common_info *
 		} else {
 			vdp_printf(VDP_DOVI_LOG, "dovi frm pts %lld rpu pts %lld len %d addr %p\n",
 			config->pts, dolby_info->pts, dolby_info->len, dolby_info->addr);
+			if (dolby_info->len > DOVI_MD_MAX_LEN) {
+				DISP_LOG_E("dovi_info size too long: %d\n",
+					dolby_info->len);
+				goto release_ion_handle;
+			}
 			if (copy_from_user(dovi_md_info->buff, (void __user *)(dolby_info->addr), dolby_info->len)) {
 				DISP_LOG_E("dovi info copy from user fail\n");
 				goto release_ion_handle;

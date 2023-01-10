@@ -103,7 +103,6 @@ enum dovi_status dovi_sec_cp_test_main(void);
 enum dovi_status dovi_sec_cp_test_uninit(void);
 enum dovi_status dovi_sec_status(void);
 enum dovi_status dovi_sec_debug_level_init(uint32_t dovi_tz_level);
-enum dovi_status dovi_sec_sec_handle_copy(uint32_t *sec_handle, uint32_t len);
 
 #if defined(CONFIG_MTK_IN_HOUSE_TEE_SUPPORT) || defined(CONFIG_TRUSTY)
 #define DOVI_TZ_OK 1

@@ -191,6 +191,7 @@ typedef PVRSRV_ERROR (*FN_CREATERAMBACKEDPMR)(struct _PVRSRV_DEVICE_NODE_ *psDev
 										IMG_UINT32 uiLog2PageSize,
 										PVRSRV_MEMALLOCFLAGS_T uiFlags,
 										const IMG_CHAR *pszAnnotation,
+										IMG_PID uiPid,
 										PMR **ppsPMRPtr);
 
 typedef struct _PVRSRV_DEVICE_NODE_
@@ -384,6 +385,9 @@ typedef struct _PVRSRV_DEVICE_NODE_
 
 	PVRSRV_DUMMY_PAGE		sDummyPage;
 
+#if !defined(PVRSRV_USE_BRIDGE_LOCK)
+	POSWR_LOCK				hMemoryContextPageFaultNotifyListLock;
+#endif /* !defined(PVRSRV_USE_BRIDGE_LOCK) */
 	DLLIST_NODE				sMemoryContextPageFaultNotifyListHead;
 
 #if defined(PDUMP)
@@ -393,6 +397,10 @@ typedef struct _PVRSRV_DEVICE_NODE_
 	PVRSRV_ERROR			(*pfnPDumpInitDevice)(struct _PVRSRV_DEVICE_NODE_ *psDeviceNode);
 	/* device-level callback to return pdump ID associated to a memory context */
 	IMG_UINT32				(*pfnMMUGetContextID)(IMG_HANDLE hDevMemContext);
+#endif
+
+#if defined(SUPPORT_VALIDATION) && !defined(PVRSRV_USE_BRIDGE_LOCK)
+	POS_LOCK				hValidationLock;
 #endif
 } PVRSRV_DEVICE_NODE;
 

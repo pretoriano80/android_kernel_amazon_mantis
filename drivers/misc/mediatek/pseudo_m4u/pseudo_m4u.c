@@ -779,6 +779,10 @@ static int __m4u_alloc_mva(M4U_PORT_ID port, unsigned long va, unsigned int size
 		int i;
 
 		table = kzalloc(sizeof(*table), GFP_KERNEL);
+		if (!table) {
+			M4UMSG("%s %d. alloc fail.\n", __func__, __LINE__);
+			return -ENOMEM;
+		}
 		ret = sg_alloc_table(table, sg_table->nents, GFP_KERNEL);
 		if (ret) {
 			kfree(table);
@@ -831,6 +835,10 @@ static int __m4u_alloc_mva(M4U_PORT_ID port, unsigned long va, unsigned int size
 	*retmva = dma_addr;
 
 	mva_sg = kzalloc(sizeof(*mva_sg), GFP_KERNEL);
+	if (!mva_sg) {
+		M4UMSG("%s %d. alloc fail.\n", __func__, __LINE__);
+		goto err;
+	}
 	mva_sg->table = table;
 	mva_sg->mva = *retmva;
 
@@ -839,12 +847,7 @@ static int __m4u_alloc_mva(M4U_PORT_ID port, unsigned long va, unsigned int size
 	M4UDBG("%s, %d mva is 0x%x, dma_address is 0x%lx, size is 0x%x\n",
 		__func__, __LINE__, mva_sg->mva, (unsigned long)dma_addr, size);
 	return 0;
-#if 0
-err_free_iova:
-	if (iova)
-		__free_iova(iovad, iova);
-	M4UMSG("iommu_map_sg failed\n");
-#endif
+
 err:
 	if (table) {
 		sg_free_table(table);

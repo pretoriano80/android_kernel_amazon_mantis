@@ -143,12 +143,20 @@ PVRSRV_ERROR OSPhyContigPagesAlloc(PVRSRV_DEVICE_NODE *psDevNode, size_t uiSize,
 
 	gfp_flags = GFP_KERNEL;
 
-#if !defined(PVR_LINUX_PHYSMEM_USE_HIGHMEM)
-	if (psDev && *psDev->dma_mask == DMA_BIT_MASK(32))
+#if !defined(PVR_LINUX_PHYSMEM_USE_HIGHMEM_ONLY)
+	if (psDev)
 	{
-		/* Limit to 32 bit.
-		 * Achieved by setting __GFP_DMA32 for 64 bit systems */
-		gfp_flags |= __GFP_DMA32;
+		if (*psDev->dma_mask == DMA_BIT_MASK(32))
+		{
+			/* Limit to 32 bit.
+			 * Achieved by setting __GFP_DMA32 for 64 bit systems */
+			gfp_flags |= __GFP_DMA32;
+		}
+		else if (*psDev->dma_mask < DMA_BIT_MASK(32))
+		{
+			/* Limit to whatever the size of DMA zone is. */
+			gfp_flags |= __GFP_DMA;
+		}
 	}
 #else
 	PVR_UNREFERENCED_PARAMETER(psDev);
@@ -176,13 +184,15 @@ PVRSRV_ERROR OSPhyContigPagesAlloc(PVRSRV_DEVICE_NODE *psDevNode, size_t uiSize,
 #if !defined(PVRSRV_ENABLE_MEMORY_STATS)
 	    PVRSRVStatsIncrMemAllocStatAndTrack(PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_UMA,
 	                                        uiSize,
-	                                        (IMG_UINT64)(uintptr_t) psPage);
+	                                        (IMG_UINT64)(uintptr_t) psPage,
+		                                    OSGetCurrentClientProcessIDKM());
 #else
 	PVRSRVStatsAddMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_UMA,
 	                             psPage,
 								 sCpuPAddr,
 								 uiSize,
-								 NULL);
+								 NULL,
+								 OSGetCurrentClientProcessIDKM());
 #endif
 #endif
 
@@ -202,7 +212,9 @@ void OSPhyContigPagesFree(PVRSRV_DEVICE_NODE *psDevNode, PG_HANDLE *psMemHandle)
 	PVRSRVStatsDecrMemAllocStatAndUntrack(PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_UMA,
 	                                      (IMG_UINT64)(uintptr_t) psPage);
 #else
-	PVRSRVStatsRemoveMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_UMA, (IMG_UINT64)(uintptr_t) psPage);
+	PVRSRVStatsRemoveMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_UMA,
+	                                (IMG_UINT64)(uintptr_t) psPage,
+	                                OSGetCurrentClientProcessIDKM());
 #endif
 #endif
 
@@ -225,7 +237,7 @@ PVRSRV_ERROR OSPhyContigPagesMap(PVRSRV_DEVICE_NODE *psDevNode, PG_HANDLE *psMem
 
 #if defined(PVRSRV_ENABLE_PROCESS_STATS)
 #if !defined(PVRSRV_ENABLE_MEMORY_STATS)
-	PVRSRVStatsIncrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE_VMAP_PT_UMA, actualSize);
+	PVRSRVStatsIncrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE_VMAP_PT_UMA, actualSize, OSGetCurrentClientProcessIDKM());
 #else
 	{
 		IMG_CPU_PHYADDR sCpuPAddr;
@@ -235,7 +247,8 @@ PVRSRV_ERROR OSPhyContigPagesMap(PVRSRV_DEVICE_NODE *psDevNode, PG_HANDLE *psMem
 									 *pvPtr,
 									 sCpuPAddr,
 									 actualSize,
-									 NULL);
+									 NULL,
+									 OSGetCurrentClientProcessIDKM());
 	}
 #endif
 #endif
@@ -248,9 +261,13 @@ void OSPhyContigPagesUnmap(PVRSRV_DEVICE_NODE *psDevNode, PG_HANDLE *psMemHandle
 #if defined(PVRSRV_ENABLE_PROCESS_STATS)
 #if !defined(PVRSRV_ENABLE_MEMORY_STATS)
 	/* Mapping is done a page at a time */
-	PVRSRVStatsDecrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE_VMAP_PT_UMA, (1 << (PAGE_SHIFT + psMemHandle->ui32Order)));
+	PVRSRVStatsDecrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE_VMAP_PT_UMA,
+	                            (1 << (PAGE_SHIFT + psMemHandle->ui32Order)),
+	                            OSGetCurrentClientProcessIDKM());
 #else
-	PVRSRVStatsRemoveMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE_VMAP_PT_UMA, (IMG_UINT64)(uintptr_t)pvPtr);
+	PVRSRVStatsRemoveMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE_VMAP_PT_UMA,
+	                                (IMG_UINT64)(uintptr_t)pvPtr,
+	                                OSGetCurrentClientProcessIDKM());
 #endif
 #endif
 
@@ -641,6 +658,7 @@ static const error_map_t asErrorMap[] =
 	{-ENOTTY, PVRSRV_ERROR_BRIDGE_CALL_FAILED},
 	{-ERANGE, PVRSRV_ERROR_BRIDGE_BUFFER_TOO_SMALL},
 	{-ENOMEM, PVRSRV_ERROR_OUT_OF_MEMORY},
+	{-EACCES, PVRSRV_ERROR_PMR_NOT_PERMITTED},
 	{-EINVAL, PVRSRV_ERROR_INVALID_PARAMS},
 
 	{0,       PVRSRV_OK}

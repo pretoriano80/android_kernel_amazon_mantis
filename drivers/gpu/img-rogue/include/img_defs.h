@@ -316,6 +316,25 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 	#define unlikely(x) (x)
 #endif
 
+/* These two macros are also provided by the kernel */
+#ifndef BIT
+#define BIT(b) (1UL << (b))
+#endif
+
+#ifndef BIT_ULL
+#define BIT_ULL(b) (1ULL << (b))
+#endif
+
+#define BIT_SET(f, b)     BITMASK_SET((f),    BIT_ULL(b))
+#define BIT_UNSET(f, b)   BITMASK_UNSET((f),  BIT_ULL(b))
+#define BIT_TOGGLE(f, b)  BITMASK_TOGGLE((f), BIT_ULL(b))
+#define BIT_ISSET(f, b)   BITMASK_HAS((f),    BIT_ULL(b))
+
+#define BITMASK_SET(f, m)     (void) ((f) |= (m))
+#define BITMASK_UNSET(f, m)   (void) ((f) &= ~(m))
+#define BITMASK_TOGGLE(f, m)  (void) ((f) ^= (m))
+#define BITMASK_HAS(f, m)     (((f) & (m)) == (m)) /* the bits from the mask are all set */
+
 #ifndef MAX
 #define MAX(a,b) 					(((a) > (b)) ? (a) : (b))
 #endif

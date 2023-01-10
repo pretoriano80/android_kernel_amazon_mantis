@@ -63,6 +63,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "cache_km.h"
 #include "pvrsrv_pool.h"
 #include "info_page.h"
+#if !defined(PVRSRV_USE_BRIDGE_LOCK)
+#include "devicemem_server.h"
+#endif /* !defined(PVRSRV_USE_BRIDGE_LOCK) */
 
 #include "log2.h"
 
@@ -1436,14 +1439,29 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVDeviceCreate(void *pvOSDevice,
 	IMG_UINT32				ui32AppHintDefault;
 	IMG_UINT32				ui32AppHintDriverMode;
 	void *pvAppHintState    = NULL;
+#if defined(PVRSRV_ENABLE_PROCESS_STATS) && !defined(PVRSRV_DEBUG_LINUX_MEMORY_STATS)
+	IMG_HANDLE				hProcessStats;
+#endif
 
-	psDeviceNode = OSAllocZMem(sizeof(*psDeviceNode));
+	psDeviceNode = OSAllocZMemNoStats(sizeof(*psDeviceNode));
 	if (!psDeviceNode)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to allocate device node",
 				 __func__));
 		return PVRSRV_ERROR_OUT_OF_MEMORY;
 	}
+
+	/* Allocate process statistics */
+#if defined(PVRSRV_ENABLE_PROCESS_STATS) && !defined(PVRSRV_DEBUG_LINUX_MEMORY_STATS)
+	eError = PVRSRVStatsRegisterProcess(&hProcessStats);
+	if (eError != PVRSRV_OK)
+	{
+		PVR_DPF((PVR_DBG_ERROR,
+			 "%s: Couldn't register process statistics (%d)",
+			 __func__, eError));
+		return eError;
+	}
+#endif
 
 	psDeviceNode->sDevId.i32UMIdentifier = i32UMIdentifier;
 
@@ -1845,6 +1863,16 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVDeviceCreate(void *pvOSDevice,
 	TUtilsInit(psDeviceNode);
 #endif
 
+#if !defined(PVRSRV_USE_BRIDGE_LOCK)
+	OSWRLockCreate(&psDeviceNode->hMemoryContextPageFaultNotifyListLock);
+	if (psDeviceNode->hMemoryContextPageFaultNotifyListLock == NULL)
+	{
+		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to create lock for PF notify list",
+		        __func__));
+		goto ErrorDecrementDeviceCount;
+	}
+#endif /* !defined(PVRSRV_USE_BRIDGE_LOCK) */
+
 	dllist_init(&psDeviceNode->sMemoryContextPageFaultNotifyListHead);
 
 	PVR_DPF((PVR_DBG_MESSAGE, "Registered device %p", psDeviceNode));
@@ -1857,6 +1885,11 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVDeviceCreate(void *pvOSDevice,
 									   psDeviceNode);
 
 	*ppsDeviceNode = psDeviceNode;
+
+#if defined(PVRSRV_ENABLE_PROCESS_STATS) && !defined(PVRSRV_DEBUG_LINUX_MEMORY_STATS)
+	/* Close the process statistics */
+	PVRSRVStatsDeregisterProcess(hProcessStats);
+#endif
 
 	return PVRSRV_OK;
 
@@ -1915,7 +1948,12 @@ ErrorSysDevDeInit:
 	SysVzDevDeInit(psDevConfig);
 	SysDevDeInit(psDevConfig);
 ErrorFreeDeviceNode:
-	OSFreeMem(psDeviceNode);
+#if defined(PVRSRV_ENABLE_PROCESS_STATS) && !defined(PVRSRV_DEBUG_LINUX_MEMORY_STATS)
+	/* Close the process statistics */
+	PVRSRVStatsDeregisterProcess(hProcessStats);
+#endif
+	OSFreeMemNoStats(psDeviceNode);
+
 	return eError;
 }
 
@@ -2008,6 +2046,9 @@ static PVRSRV_ERROR _ReadStateFlag(const PVRSRV_DEVICE_NODE *psDevice,
 PVRSRV_ERROR PVRSRVDeviceInitialise(PVRSRV_DEVICE_NODE *psDeviceNode)
 {
 	IMG_BOOL bInitSuccesful = IMG_FALSE;
+#if defined(PVRSRV_ENABLE_PROCESS_STATS) && !defined(PVRSRV_DEBUG_LINUX_MEMORY_STATS)
+	IMG_HANDLE hProcessStats;
+#endif
 	PVRSRV_ERROR eError;
 
 	if (psDeviceNode->eDevState != PVRSRV_DEVICE_STATE_INIT)
@@ -2015,6 +2056,18 @@ PVRSRV_ERROR PVRSRVDeviceInitialise(PVRSRV_DEVICE_NODE *psDeviceNode)
 		PVR_DPF((PVR_DBG_ERROR, "%s: Device already initialised", __func__));
 		return PVRSRV_ERROR_INIT_FAILURE;
 	}
+
+	/* Allocate process statistics */
+#if defined(PVRSRV_ENABLE_PROCESS_STATS) && !defined(PVRSRV_DEBUG_LINUX_MEMORY_STATS)
+	eError = PVRSRVStatsRegisterProcess(&hProcessStats);
+	if (eError != PVRSRV_OK)
+	{
+		PVR_DPF((PVR_DBG_ERROR,
+			 "%s: Couldn't register process statistics (%d)",
+			 __func__, eError));
+		return eError;
+	}
+#endif
 
 #if defined(SUPPORT_RGX)
 	eError = RGXInit(psDeviceNode);
@@ -2083,6 +2136,12 @@ Exit:
 	                                  RGXQueryPdumpPanicEnable, RGXSetPdumpPanicEnable,
 	                                  psDeviceNode,
 	                                  NULL);
+
+#if defined(PVRSRV_ENABLE_PROCESS_STATS) && !defined(PVRSRV_DEBUG_LINUX_MEMORY_STATS)
+	/* Close the process statistics */
+	PVRSRVStatsDeregisterProcess(hProcessStats);
+#endif
+
 	return eError;
 }
 
@@ -2105,6 +2164,13 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVDeviceDestroy(PVRSRV_DEVICE_NODE *psDeviceNode)
 	psPVRSRVData->ui32RegisteredDevices--;
 
 	psDeviceNode->eDevState = PVRSRV_DEVICE_STATE_DEINIT;
+
+#if !defined(PVRSRV_USE_BRIDGE_LOCK)
+	if (psDeviceNode->hMemoryContextPageFaultNotifyListLock != NULL)
+	{
+		OSWRLockDestroy(psDeviceNode->hMemoryContextPageFaultNotifyListLock);
+	}
+#endif /* !defined(PVRSRV_USE_BRIDGE_LOCK) */
 
 #if defined(PVR_TESTING_UTILS)
 	TUtilsDeinit(psDeviceNode);
@@ -2310,7 +2376,7 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVDeviceDestroy(PVRSRV_DEVICE_NODE *psDeviceNode)
 	SysVzDevDeInit(psDeviceNode->psDevConfig);
 	SysDevDeInit(psDeviceNode->psDevConfig);
 
-	OSFreeMem(psDeviceNode);
+	OSFreeMemNoStats(psDeviceNode);
 
 	return PVRSRV_OK;
 }
@@ -2372,7 +2438,8 @@ PVRSRV_ERROR LMA_PhyContigPagesAlloc(PVRSRV_DEVICE_NODE *psDevNode, size_t uiSiz
 #if !defined(PVRSRV_ENABLE_MEMORY_STATS)
 	    PVRSRVStatsIncrMemAllocStatAndTrack(PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_LMA,
 	                                        uiSize,
-	                                        (IMG_UINT64)(uintptr_t) psMemHandle);
+	                                        (IMG_UINT64)(uintptr_t) psMemHandle,
+		                                    OSGetCurrentClientProcessIDKM());
 #else
 		IMG_CPU_PHYADDR sCpuPAddr;
 		sCpuPAddr.uiAddr = psDevPAddr->uiAddr;
@@ -2381,7 +2448,8 @@ PVRSRV_ERROR LMA_PhyContigPagesAlloc(PVRSRV_DEVICE_NODE *psDevNode, size_t uiSiz
 		                             NULL,
 		                             sCpuPAddr,
 		                             uiSize,
-		                             NULL);
+		                             NULL,
+		                             OSGetCurrentClientProcessIDKM());
 #endif
 #endif
 		psMemHandle->ui32Order = ui32Log2NumPages;
@@ -2399,7 +2467,9 @@ void LMA_PhyContigPagesFree(PVRSRV_DEVICE_NODE *psDevNode, PG_HANDLE *psMemHandl
 	PVRSRVStatsDecrMemAllocStatAndUntrack(PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_LMA,
 	                                      (IMG_UINT64)(uintptr_t) psMemHandle);
 #else
-		PVRSRVStatsRemoveMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_LMA, (IMG_UINT64)uiCardAddr);
+		PVRSRVStatsRemoveMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE_ALLOC_PAGES_PT_LMA,
+		                                (IMG_UINT64)uiCardAddr,
+		                                OSGetCurrentClientProcessIDKM());
 #endif
 #endif
 	RA_Free(psDevNode->apsLocalDevMemArenas[0], uiCardAddr);
@@ -2427,14 +2497,17 @@ PVRSRV_ERROR LMA_PhyContigPagesMap(PVRSRV_DEVICE_NODE *psDevNode, PG_HANDLE *psM
 	{
 #if defined(PVRSRV_ENABLE_PROCESS_STATS)
 #if !defined(PVRSRV_ENABLE_MEMORY_STATS)
-		PVRSRVStatsIncrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE_IOREMAP_PT_LMA, ui32NumPages * OSGetPageSize());
+		PVRSRVStatsIncrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE_IOREMAP_PT_LMA,
+		                            ui32NumPages * OSGetPageSize(),
+		                            OSGetCurrentClientProcessIDKM());
 #else
 		{
 			PVRSRVStatsAddMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE_IOREMAP_PT_LMA,
 										 *pvPtr,
 										 sCpuPAddr,
 										 ui32NumPages * OSGetPageSize(),
-										 NULL);
+										 NULL,
+										 OSGetCurrentClientProcessIDKM());
 		}
 #endif
 #endif
@@ -2451,9 +2524,13 @@ void LMA_PhyContigPagesUnmap(PVRSRV_DEVICE_NODE *psDevNode, PG_HANDLE *psMemHand
 
 #if defined(PVRSRV_ENABLE_PROCESS_STATS)
 #if !defined(PVRSRV_ENABLE_MEMORY_STATS)
-		PVRSRVStatsDecrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE_IOREMAP_PT_LMA, ui32NumPages * OSGetPageSize());
+		PVRSRVStatsDecrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE_IOREMAP_PT_LMA,
+		                            ui32NumPages * OSGetPageSize(),
+		                            OSGetCurrentClientProcessIDKM());
 #else
-	PVRSRVStatsRemoveMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE_IOREMAP_PT_LMA, (IMG_UINT64)(uintptr_t)pvPtr);
+	PVRSRVStatsRemoveMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE_IOREMAP_PT_LMA,
+	                                (IMG_UINT64)(uintptr_t)pvPtr,
+	                                OSGetCurrentClientProcessIDKM());
 #endif
 #endif
 

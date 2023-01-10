@@ -129,7 +129,6 @@ static int mtk_vq_mgr_prepare_buffer(struct ion_client *client,
 		}
 
 		config_info->src_mva[i] = mva;
-		config_info->src_va[i] = ion_map_kernel(client, config_info->src_ion_handle[i]);
 
 		VQ_INFO("the %d src mva is 0x%x va:%p\n", i, config_info->src_mva[i],
 			config_info->src_va[i]);
@@ -156,7 +155,6 @@ static int mtk_vq_mgr_prepare_buffer(struct ion_client *client,
 	}
 
 	config_info->dst_mva = mva;
-	config_info->dst_va = ion_map_kernel(client, config_info->dst_ion_handle);
 
 	VQ_INFO("the dst mva is 0x%x va:%p TFF %d field %d\n",
 	config_info->dst_mva,

@@ -48,16 +48,26 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <ri_typedefs.h>
 #include <pmr.h>
 #include <pvrsrv_error.h>
+#include <physheap.h>
 
 PVRSRV_ERROR RIInitKM(void);
 void RIDeInitKM(void);
+
+void RILockAcquireKM(void);
+void RILockReleaseKM(void);
 
 PVRSRV_ERROR RIPMRPhysicalBackingKM(PMR *psPMR, IMG_BOOL bHasBacking);
 
 PVRSRV_ERROR RIWritePMREntryKM(PMR *psPMR,
 					   	   	   IMG_UINT32 ui32TextASize,
 					   	   	   const IMG_CHAR ai8TextA[RI_MAX_TEXT_LEN+1],
-					   	   	   IMG_UINT64 uiLogicalSize);
+							   IMG_UINT64 ui64LogicalSize);
+
+PVRSRV_ERROR RIWritePMREntryWithOwnerKM(PMR *psPMR,
+									    IMG_UINT32 ui32TextASize,
+									    const IMG_CHAR ai8TextA[RI_MAX_TEXT_LEN+1],
+									    IMG_UINT64 ui64LogicalSize,
+									    IMG_PID ui32Owner);
 
 PVRSRV_ERROR RIWriteMEMDESCEntryKM(PMR *psPMR,
 					   	   	   	   IMG_UINT32 ui32TextBSize,
@@ -106,5 +116,7 @@ PVRSRV_ERROR RIDumpProcessListKM(PMR *psPMR,
 IMG_BOOL RIGetListEntryKM(IMG_PID pid,
 						  IMG_HANDLE **ppHandle,
 						  IMG_CHAR **ppszEntryString);
+
+IMG_INT32 RITotalAllocProcessKM(IMG_PID pid, PHYS_HEAP_TYPE ePhysHeapType);
 
 #endif /* #ifndef _RI_SERVER_H _*/

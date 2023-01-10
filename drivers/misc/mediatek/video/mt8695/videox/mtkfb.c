@@ -651,7 +651,16 @@ void mtkfb_free_reserved_fb(void)
 			(void *)__va(framebuffer_base + framebuffer_size - 1), -1, "fb");
 		framebuffer_base = 0;
 	}
-
+	/*after flash update 10 frame UI, will free this fb buffer, but
+	 *user still can get this fb buffer via screen base address or
+	 *mmap fb buffer via smem_start and smem_len. so set fb pa, va address
+	 *and smem_len to null when free fb buffer.
+	 */
+	if(mtkfb_fbi) {
+		mtkfb_fbi->screen_base = 0;
+		mtkfb_fbi->fix.smem_len = 0;
+		mtkfb_fbi->fix.smem_start = 0;
+	}
 }
 
 static void _parse_tag_videolfb(struct device *dev)

@@ -71,6 +71,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Server-side bridge entry points
  */
  
+
+
+
 static IMG_INT
 PVRSRVBridgeRGXSetRegConfigType(IMG_UINT32 ui32DispatchTableEntry,
 					  PVRSRV_BRIDGE_IN_RGXSETREGCONFIGTYPE *psRGXSetRegConfigTypeIN,
@@ -98,6 +101,9 @@ PVRSRVBridgeRGXSetRegConfigType(IMG_UINT32 ui32DispatchTableEntry,
 
 	return 0;
 }
+
+
+
 
 
 static IMG_INT
@@ -131,6 +137,9 @@ PVRSRVBridgeRGXAddRegconfig(IMG_UINT32 ui32DispatchTableEntry,
 }
 
 
+
+
+
 static IMG_INT
 PVRSRVBridgeRGXClearRegConfig(IMG_UINT32 ui32DispatchTableEntry,
 					  PVRSRV_BRIDGE_IN_RGXCLEARREGCONFIG *psRGXClearRegConfigIN,
@@ -161,6 +170,9 @@ PVRSRVBridgeRGXClearRegConfig(IMG_UINT32 ui32DispatchTableEntry,
 }
 
 
+
+
+
 static IMG_INT
 PVRSRVBridgeRGXEnableRegConfig(IMG_UINT32 ui32DispatchTableEntry,
 					  PVRSRV_BRIDGE_IN_RGXENABLEREGCONFIG *psRGXEnableRegConfigIN,
@@ -189,6 +201,9 @@ PVRSRVBridgeRGXEnableRegConfig(IMG_UINT32 ui32DispatchTableEntry,
 
 	return 0;
 }
+
+
+
 
 
 static IMG_INT

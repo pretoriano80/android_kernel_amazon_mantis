@@ -54,37 +54,6 @@ static KREE_SESSION_HANDLE mem_session;
 int nr_test_get_fd(struct ion_client *client, bool en)
 {
 	int fd = -1;
-	int i;
-
-	struct ion_handle *handle = NULL;
-	unsigned int debug_size = 1920 * 1088 * 2;
-	void *debug_va = NULL;
-
-	handle = ion_alloc(client, debug_size, 0, ION_HEAP_MULTIMEDIA_MASK, 0);
-	if (IS_ERR(handle)) {
-		pr_info("[IRT]allocate ion handle fail.\n");
-		ion_free(client, handle);
-		ion_client_destroy(client);
-		return -1;
-	}
-
-	debug_va = ion_map_kernel(client, handle);
-	if (debug_va == NULL) {
-		pr_info("[IRT]map va fail.\n");
-		ion_free(client, handle);
-		ion_client_destroy(client);
-		return -1;
-	}
-
-	fd = ion_share_dma_buf_fd(client, handle);
-
-	pr_info("[IRT] alloc va addr is 0x%lx fd %d\n", (unsigned long)debug_va, fd);
-	if (en) {
-		for (i = 0; i < 4; i++) {
-			memset(debug_va, (i+1) * 40, 720 * 120);
-			debug_va += 720 * 120;
-		}
-	}
 
 	return fd;
 }

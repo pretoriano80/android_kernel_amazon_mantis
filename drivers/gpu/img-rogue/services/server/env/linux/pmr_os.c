@@ -129,12 +129,16 @@ static void MMapPMRClose(struct vm_area_struct *ps_vma)
 		while (vAddr < ps_vma->vm_end)
 		{
 			/* USER MAPPING */
-			PVRSRVStatsRemoveMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE_MAP_UMA_LMA_PAGES, (IMG_UINT64)vAddr);
+			PVRSRVStatsRemoveMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE_MAP_UMA_LMA_PAGES,
+			                                (IMG_UINT64)vAddr,
+			                                OSGetCurrentClientProcessIDKM());
 			vAddr += PAGE_SIZE;
 		}
 	}
 #else
-	PVRSRVStatsDecrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE_MAP_UMA_LMA_PAGES, ps_vma->vm_end - ps_vma->vm_start);
+	PVRSRVStatsDecrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE_MAP_UMA_LMA_PAGES,
+	                            ps_vma->vm_end - ps_vma->vm_start,
+	                            OSGetCurrentClientProcessIDKM());
 #endif
 #endif
 
@@ -341,17 +345,17 @@ OSMMapPMRGeneric(PMR *psPMR, PMR_MMAP_DATA pOSMMapData)
 	IMG_BOOL bUseMixedMap = IMG_FALSE;
 	IMG_BOOL bUseVMInsertPage = IMG_FALSE;
 
+	/* if writeable but not shared mapping is requested then fail */
+	if (((ps_vma->vm_flags & VM_WRITE) != 0) &&
+		((ps_vma->vm_flags & VM_SHARED) == 0))
+	{
+		return PVRSRV_ERROR_INVALID_PARAMS;
+	}
+
 	eError = PMRLockSysPhysAddresses(psPMR);
 	if (eError != PVRSRV_OK)
 	{
 		goto e0;
-	}
-
-	if (((ps_vma->vm_flags & VM_WRITE) != 0) &&
-		((ps_vma->vm_flags & VM_SHARED) == 0))
-	{
-		eError = PVRSRV_ERROR_INVALID_PARAMS;
-		goto e1;
 	}
 
 	sPageProt = vm_get_page_prot(ps_vma->vm_flags);
@@ -529,12 +533,13 @@ OSMMapPMRGeneric(PMR *psPMR, PMR_MMAP_DATA pOSMMapData)
 									(void*)(uintptr_t)(ps_vma->vm_start + uiOffset),
 									psCpuPAddr[uiOffsetIdx],
 									1<<uiLog2PageSize,
-									NULL);
+									NULL,
+									OSGetCurrentClientProcessIDKM());
 #endif
 	}
 
 #if defined(PVRSRV_ENABLE_PROCESS_STATS) && !defined(PVRSRV_ENABLE_MEMORY_STATS)
-	PVRSRVStatsIncrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE_MAP_UMA_LMA_PAGES, uiNumOfPFNs * PAGE_SIZE);
+	PVRSRVStatsIncrMemAllocStat(PVRSRV_MEM_ALLOC_TYPE_MAP_UMA_LMA_PAGES, uiNumOfPFNs * PAGE_SIZE, OSGetCurrentClientProcessIDKM());
 #endif
 
 	if (psCpuPAddr != asCpuPAddr)

@@ -49,4 +49,8 @@ typedef struct shm_buffer_s {
 	unsigned long long size;
 } shm_buf_t;
 
+/* usage ID */
+#define DEFAUT_USAGE_ID        0
+#define VDEC_USAGE_ID          1
+
 #endif /* __TRUSTZONE_TA_MEM__ */

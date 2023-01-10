@@ -607,11 +607,27 @@ static int uhid_dev_destroy(struct uhid_device *uhid)
 
 static int uhid_dev_input(struct uhid_device *uhid, struct uhid_event *ev)
 {
+#ifdef CONFIG_HID_FTV_BLEREMOTE
+	int ret;
+#endif
+
 	if (!uhid->running)
 		return -EINVAL;
 
+#ifdef CONFIG_HID_FTV_BLEREMOTE
+	ret = hid_input_report(uhid->hid, HID_INPUT_REPORT, ev->u.input.data,
+					min_t(size_t, ev->u.input.size, UHID_DATA_MAX), 0);
+
+	if (uhid->hid && uhid->hid->driver && uhid->hid->driver->name) {
+		if (strcmp(uhid->hid->driver->name, "FireTV remote") == 0) {
+			if (ret == -EBUSY)
+				return ret;
+		}
+	}
+#else
 	hid_input_report(uhid->hid, HID_INPUT_REPORT, ev->u.input.data,
 			 min_t(size_t, ev->u.input.size, UHID_DATA_MAX), 0);
+#endif
 
 	return 0;
 }

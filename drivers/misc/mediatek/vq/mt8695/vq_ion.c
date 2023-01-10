@@ -79,8 +79,6 @@ size_t vq_ion_phys_mmu_addr(struct ion_client *client, struct ion_handle *handle
 
 	ion_phys(client, handle, (ion_phys_addr_t *) mva, &size);
 
-	VQ_INFO("mva[0x%08x] va:[%p]\n", *mva, ion_map_kernel(client, handle));
-
 	return size;
 
 }

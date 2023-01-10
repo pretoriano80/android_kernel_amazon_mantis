@@ -1,9 +1,9 @@
-/**************************************************************************/ /*!
+/*************************************************************************/ /*!
 @File
-@Title          Header for local card memory allocator
+@Title          Services Resource Information (RI) common types and definitions
 @Copyright      Copyright (c) Imagination Technologies Ltd. All Rights Reserved
-@Description    Part of the memory management. This module is responsible for
-                implementing the function callbacks for local card memory.
+@Description    Resource Information (RI) common types and definitions included
+                in both user mode and kernel mode source.
 @License        Dual MIT/GPLv2
 
 The contents of this file are subject to the MIT license as set out below.
@@ -40,47 +40,29 @@ PURPOSE AND NONINFRINGEMENT; AND (B) IN NO EVENT SHALL THE AUTHORS OR
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/ /***************************************************************************/
+*/ /**************************************************************************/
+#ifndef __PVR_RICOMMON_H__
+#define __PVR_RICOMMON_H__
 
-#ifndef _SRVSRV_PHYSMEM_LMA_H_
-#define _SRVSRV_PHYSMEM_LMA_H_
-
-/* include/ */
-#include "img_types.h"
-#include "pvrsrv_error.h"
-#include "pvrsrv_memallocflags.h"
-
-/* services/server/include/ */
-#include "pmr.h"
-#include "pmr_impl.h"
-
-/*
- * PhysmemNewLocalRamBackedPMR
- *
- * This function will create a PMR using the local card memory and is OS
- * agnostic.
- */
-PVRSRV_ERROR
-PhysmemNewLocalRamBackedPMR(PVRSRV_DEVICE_NODE *psDevNode,
-							IMG_DEVMEM_SIZE_T uiSize,
-							IMG_DEVMEM_SIZE_T uiChunkSize,
-							IMG_UINT32 ui32NumPhysChunks,
-							IMG_UINT32 ui32NumVirtChunks,
-							IMG_UINT32 *pui32MappingTable,
-							IMG_UINT32 uiLog2PageSize,
-							PVRSRV_MEMALLOCFLAGS_T uiFlags,
-							const IMG_CHAR *pszAnnotation,
-							IMG_PID uiPid,
-							PMR **ppsPMRPtr);
-
-#if defined(SUPPORT_GPUVIRT_VALIDATION)
-/*
- * Define some helper list functions for the virtualization validation code
- */
-
-void	InsertPidOSidsCoupling(IMG_PID pId, IMG_UINT32 ui32OSid, IMG_UINT32 ui32OSidReg, IMG_BOOL bOSidAxiProt);
-void	RetrieveOSidsfromPidList(IMG_PID pId, IMG_UINT32 *pui32OSid, IMG_UINT32 *pui32OSidReg, IMG_BOOL *pbOSidAxiProt);
-void	RemovePidOSidCoupling(IMG_PID pId);
+#if defined (__cplusplus)
+extern "C" {
 #endif
 
-#endif /* #ifndef _SRVSRV_PHYSMEM_LMA_H_ */
+#include "img_defs.h"
+
+
+/*! Maximum text string length including the null byte */
+#define PRVSRVRI_MAX_TEXT_LENGTH	20U
+
+/* PID used to hold PMR allocations which are driver-wide (ie have a lifetime
+   longer than an application process) */
+#define PVR_SYS_ALLOC_PID 1
+
+#if defined (__cplusplus)
+}
+#endif
+
+#endif /* __PVR_RICOMMON_H__ */
+/******************************************************************************
+ End of file (pvr_ricommon.h)
+******************************************************************************/

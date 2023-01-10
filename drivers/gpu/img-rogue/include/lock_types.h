@@ -55,6 +55,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * isn't ideal and usually you wouldn't do that in kernel code. */
 typedef struct mutex *POS_LOCK;
 typedef atomic_t ATOMIC_T;
+typedef struct rw_semaphore *POSWR_LOCK;
 
 #else /* defined(LINUX) && defined(__KERNEL__) */
 #include "img_types.h" /* needed for IMG_INT */

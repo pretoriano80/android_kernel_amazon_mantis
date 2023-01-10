@@ -70,6 +70,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvrsrv_tlcommon.h"
 #include "client_pvrtl_bridge.h"
 
+#if defined(__KERNEL__)
+#include "srvcore.h"
+#else
+#include "srvcore_intern.h"
+#endif
+
 /* Defines/Constants
  */
 
@@ -226,7 +232,10 @@ PVRSRV_ERROR TLClientCloseStream(IMG_HANDLE hSrvHandle,
 
 	/* Send close to server to clean up kernel mode resources for this
 	 * handle and release the memory. */
-	eError = BridgeTLCloseStream(hSrvHandle, psSD->hServerSD);
+	eError = DestroyServerResource(hSrvHandle,
+	                               NULL,
+	                               BridgeTLCloseStream,
+	                               psSD->hServerSD);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "BridgeTLCloseStream: KM returned %d", eError));

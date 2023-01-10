@@ -108,10 +108,13 @@ typedef struct _HANDLE_DATA_
 	/* List entry for sibling subhandles */
 	HANDLE_LIST sSiblings;
 
-	/* Reference count. The pfnReleaseData callback gets called when the
-	 * reference count hits zero
-	 */
-	IMG_UINT32 ui32RefCount;
+	/* Reference count of lookups made. It helps track which resources are in
+	 * use in concurrent bridge calls. */
+	IMG_INT32 iLookupCount;
+	/* State of a handle. If the handle was already destroyed this is false.
+	 * If this is false and iLookupCount is 0 the pfnReleaseData callback is
+	 * called on the handle. */
+	IMG_BOOL bCanLookup;
 } HANDLE_DATA;
 
 struct _HANDLE_BASE_
@@ -173,11 +176,11 @@ void UnlockHandle(void)
  */
 PVRSRV_HANDLE_BASE *gpsKernelHandleBase = NULL;
 
-/* Increase the reference count on the given handle.
+/* Increase the lookup reference count on the given handle.
  * The handle lock must already be acquired.
  * Returns: the reference count after the increment
  */
-static inline IMG_UINT32 _HandleRef(HANDLE_DATA *psHandleData)
+static inline IMG_UINT32 HandleGet(HANDLE_DATA *psHandleData)
 {
 #if defined PVRSRV_DEBUG_HANDLE_LOCK
 	if (!OSLockIsLocked(gHandleLock))
@@ -186,15 +189,23 @@ static inline IMG_UINT32 _HandleRef(HANDLE_DATA *psHandleData)
 		OSDumpStack();
 	}
 #endif
-	psHandleData->ui32RefCount++;
-	return psHandleData->ui32RefCount;
+
+#ifdef DEBUG_REFCNT
+	PVR_DPF((PVR_DBG_ERROR, "%s: bCanLookup = %u, iLookupCount %d -> %d",
+	        __func__, psHandleData->bCanLookup, psHandleData->iLookupCount,
+	        psHandleData->iLookupCount + 1));
+#endif /* DEBUG_REFCNT */
+
+	PVR_ASSERT(psHandleData->bCanLookup);
+
+	return ++psHandleData->iLookupCount;
 }
 
-/* Decrease the reference count on the given handle.
+/* Decrease the lookup reference count on the given handle.
  * The handle lock must already be acquired.
  * Returns: the reference count after the decrement
  */
-static inline IMG_UINT32 _HandleUnref(HANDLE_DATA *psHandleData)
+static inline IMG_UINT32 HandlePut(HANDLE_DATA *psHandleData)
 {
 #if defined PVRSRV_DEBUG_HANDLE_LOCK
 	if (!OSLockIsLocked(gHandleLock))
@@ -203,10 +214,17 @@ static inline IMG_UINT32 _HandleUnref(HANDLE_DATA *psHandleData)
 		OSDumpStack();
 	}
 #endif
-	PVR_ASSERT(psHandleData->ui32RefCount > 0);
-	psHandleData->ui32RefCount--;
 
-	return psHandleData->ui32RefCount;
+#ifdef DEBUG_REFCNT
+	PVR_DPF((PVR_DBG_ERROR, "%s: bCanLookup = %u, iLookupCount %d -> %d",
+	        __func__, psHandleData->bCanLookup, psHandleData->iLookupCount,
+	        psHandleData->iLookupCount - 1));
+#endif /* DEBUG_REFCNT */
+
+	/* psHandleData->bCanLookup can be false at this point */
+	PVR_ASSERT(psHandleData->iLookupCount > 0);
+
+	return --psHandleData->iLookupCount;
 }
 
 #if defined(PVRSRV_NEED_PVR_DPF)
@@ -224,7 +242,38 @@ static const IMG_CHAR *HandleTypeToString(PVRSRV_HANDLE_TYPE eType)
 			return "INVALID";
 	}
 }
+static const IMG_CHAR *HandleBaseTypeToString(PVRSRV_HANDLE_BASE_TYPE eType)
+{
+	#define HANDLEBASETYPE(x) \
+			case PVRSRV_HANDLE_BASE_TYPE_##x: \
+				return #x;
+	switch (eType)
+	{
+		HANDLEBASETYPE(CONNECTION);
+		HANDLEBASETYPE(PROCESS);
+		HANDLEBASETYPE(GLOBAL);
+		#undef HANDLEBASETYPE
+
+		default:
+			return "INVALID";
+	}
+}
 #endif /* PVRSRV_NEED_PVR_DPF */
+
+static PVRSRV_ERROR HandleUnrefAndMaybeMarkForFree(PVRSRV_HANDLE_BASE *psBase,
+                                                   HANDLE_DATA *psHandleData,
+                                                   IMG_HANDLE hHandle,
+                                                   PVRSRV_HANDLE_TYPE eType);
+
+static PVRSRV_ERROR HandleFreePrivData(PVRSRV_HANDLE_BASE *psBase,
+                                       HANDLE_DATA *psHandleData,
+                                       IMG_HANDLE hHandle,
+                                       PVRSRV_HANDLE_TYPE eType);
+
+static PVRSRV_ERROR HandleFreeDestroy(PVRSRV_HANDLE_BASE *psBase,
+                                      HANDLE_DATA *psHandleData,
+                                      IMG_HANDLE hHandle,
+                                      PVRSRV_HANDLE_TYPE eType);
 
 /*!
 ******************************************************************************
@@ -870,127 +919,6 @@ void InitKey(HAND_KEY aKey,
 	aKey[HAND_KEY_PARENT] = (uintptr_t)hParent;
 }
 
-static PVRSRV_ERROR FreeHandleWrapper(PVRSRV_HANDLE_BASE *psBase, IMG_HANDLE hHandle);
-
-/*!
-******************************************************************************
-
- @Function	FreeHandle
-
- @Description	Free a handle data structure.
-
- @Input		psBase - Pointer to handle base structure
-		hHandle - Handle to be freed
-		eType - Type of the handle to be freed
-		ppvData - Location for data associated with the freed handle
-
- @Output 		ppvData - Points to data that was associated with the freed handle
-
- @Return	PVRSRV_OK or PVRSRV_ERROR
-
-******************************************************************************/
-static PVRSRV_ERROR FreeHandle(PVRSRV_HANDLE_BASE *psBase,
-			       IMG_HANDLE hHandle,
-			       PVRSRV_HANDLE_TYPE eType,
-			       void **ppvData)
-{
-	HANDLE_DATA *psHandleData = NULL;
-	HANDLE_DATA *psReleasedHandleData;
-	PVRSRV_ERROR eError;
-
-	eError = GetHandleData(psBase, &psHandleData, hHandle, eType);
-	if (eError != PVRSRV_OK)
-	{
-		return eError;
-	}
-
-	if (_HandleUnref(psHandleData) > 0)
-	{
-		/* this handle still has references so do not destroy it
-		 * or the underlying object yet
-		 */
-		return PVRSRV_OK;
-	}
-
-	/* Call the release data callback for each reference on the handle */
-	if (psHandleData->pfnReleaseData != NULL)
-	{
-		eError = psHandleData->pfnReleaseData(psHandleData->pvData);
-		if (eError == PVRSRV_ERROR_RETRY)
-		{
-			PVR_DPF((PVR_DBG_MESSAGE,
-				 "FreeHandle: "
-				 "Got retry while calling release data callback for %p (type = %d)",
-				 hHandle,
-				 (IMG_UINT32)psHandleData->eType));
-
-			/* the caller should retry, so retain a reference on the handle */
-			_HandleRef(psHandleData);
-
-			return eError;
-		}
-		else if (eError != PVRSRV_OK)
-		{
-			return eError;
-		}
-	}
-
-	if (!TEST_ALLOC_FLAG(psHandleData, PVRSRV_HANDLE_ALLOC_FLAG_MULTI))
-	{
-		HAND_KEY aKey;
-		IMG_HANDLE hRemovedHandle;
-
-		InitKey(aKey, psBase, psHandleData->pvData, psHandleData->eType, ParentIfPrivate(psHandleData));
-
-		hRemovedHandle = (IMG_HANDLE)HASH_Remove_Extended(psBase->psHashTab, aKey);
-
-		PVR_ASSERT(hRemovedHandle != NULL);
-		PVR_ASSERT(hRemovedHandle == psHandleData->hHandle);
-		PVR_UNREFERENCED_PARAMETER(hRemovedHandle);
-	}
-
-	eError = UnlinkFromParent(psBase, psHandleData);
-	if (eError != PVRSRV_OK)
-	{
-		PVR_DPF((PVR_DBG_ERROR,
-			 "FreeHandle: Error whilst unlinking from parent handle (%s)",
-			 PVRSRVGetErrorStringKM(eError)));
-		return eError;
-	}
-
-	/* Free children */
-	eError = IterateOverChildren(psBase, psHandleData, FreeHandleWrapper);
-	if (eError != PVRSRV_OK)
-	{
-		PVR_DPF((PVR_DBG_ERROR,
-			 "FreeHandle: Error whilst freeing subhandles (%s)",
-			 PVRSRVGetErrorStringKM(eError)));
-		return eError;
-	}
-
-	eError = gpsHandleFuncs->pfnReleaseHandle(psBase->psImplBase,
-						  psHandleData->hHandle,
-						  (void **)&psReleasedHandleData);
-	if (eError == PVRSRV_OK)
-	{
-		PVR_ASSERT(psReleasedHandleData == psHandleData);
-	}
-
-	if (ppvData)
-	{
-		*ppvData = psHandleData->pvData;
-	}
-
-	OSFreeMem(psHandleData);
-
-	return eError;
-}
-
-static PVRSRV_ERROR FreeHandleWrapper(PVRSRV_HANDLE_BASE *psBase, IMG_HANDLE hHandle)
-{
-	return FreeHandle(psBase, hHandle, PVRSRV_HANDLE_TYPE_NONE, NULL);
-}
-
 /*!
 ******************************************************************************
 
@@ -1105,7 +1033,12 @@ static PVRSRV_ERROR AllocHandle(PVRSRV_HANDLE_BASE *psBase,
 	psNewHandleData->eFlag = eFlag;
 	psNewHandleData->pvData = pvData;
 	psNewHandleData->pfnReleaseData = pfnReleaseData;
-	psNewHandleData->ui32RefCount = 1;
+	psNewHandleData->iLookupCount = 0;
+	psNewHandleData->bCanLookup = IMG_TRUE;
+
+#ifdef DEBUG_REFCNT
+	PVR_DPF((PVR_DBG_ERROR, "%s: bCanLookup = true", __func__));
+#endif /* DEBUG_REFCNT */
 
 	InitParentList(psNewHandleData);
 #if defined(DEBUG)
@@ -1318,10 +1251,10 @@ PVRSRV_ERROR PVRSRVAllocSubHandleUnlocked(PVRSRV_HANDLE_BASE *psBase,
 		PVR_DPF((PVR_DBG_ERROR, "PVRSRVAllocSubHandle: Failed to get parent handle structure"));
 
 		/* If we were able to allocate the handle then there should be no reason why we
-		   can't also get it's handle structure. Otherwise something has gone badly wrong. */
+		   can't also get its handle structure. Otherwise something has gone badly wrong. */
 		PVR_ASSERT(eError == PVRSRV_OK);
 
-		goto Exit;
+		goto ExitFreeHandle;
 	}
 
 	/*
@@ -1334,8 +1267,7 @@ PVRSRV_ERROR PVRSRVAllocSubHandleUnlocked(PVRSRV_HANDLE_BASE *psBase,
 	{
 		PVR_DPF((PVR_DBG_ERROR, "PVRSRVAllocSubHandle: Failed to get parent handle structure"));
 
-		(void)FreeHandle(psBase, hHandle, eType, NULL);
-		goto Exit;
+		goto ExitFreeHandle;
 	}
 
 	eError = AdoptChild(psBase, psPHandleData, psCHandleData);
@@ -1343,14 +1275,15 @@ PVRSRV_ERROR PVRSRVAllocSubHandleUnlocked(PVRSRV_HANDLE_BASE *psBase,
 	{
 		PVR_DPF((PVR_DBG_ERROR, "PVRSRVAllocSubHandle: Parent handle failed to adopt subhandle"));
 
-		(void)FreeHandle(psBase, hHandle, eType, NULL);
-		goto Exit;
+		goto ExitFreeHandle;
 	}
 
 	*phHandle = hHandle;
 
-	eError = PVRSRV_OK;
+	return PVRSRV_OK;
 
+ExitFreeHandle:
+	PVRSRVDestroyHandleUnlocked(psBase, hHandle, eType);
 Exit:
 	return eError;
 }
@@ -1530,9 +1463,16 @@ PVRSRV_ERROR PVRSRVLookupHandleUnlocked(PVRSRV_HANDLE_BASE *psBase,
 		goto Exit;
 	}
 
+	/* If bCanLookup is false it means that a destroy operation was already
+	 * called on this handle; therefore it can no longer be looked up. */
+	if (!psHandleData->bCanLookup)
+	{
+		return PVRSRV_ERROR_HANDLE_NOT_ALLOCATED;
+	}
+
 	if (bRef)
 	{
-		_HandleRef(psHandleData);
+		HandleGet(psHandleData);
 	}
 
 	*ppvData = psHandleData->pvData;
@@ -1678,70 +1618,67 @@ ExitUnlock:
 	return eError;
 }
 
+
+
 /*!
 ******************************************************************************
-
- @Function	PVRSRVReleaseHandle
-
- @Description	Release a handle that is no longer needed
-
- @Input 	hHandle - handle from client
-		eType - handle type
-
- @Return	Error code or PVRSRV_OK
-
+ @Function    PVRSRVReleaseHandle
+ @Description Release a handle that is no longer needed
+ @Input       hHandle - handle from client
+              eType - handle type
 ******************************************************************************/
-PVRSRV_ERROR PVRSRVReleaseHandle(PVRSRV_HANDLE_BASE *psBase,
-				 IMG_HANDLE hHandle,
-				 PVRSRV_HANDLE_TYPE eType)
+void PVRSRVReleaseHandle(PVRSRV_HANDLE_BASE *psBase,
+                         IMG_HANDLE hHandle,
+                         PVRSRV_HANDLE_TYPE eType)
 {
-	PVRSRV_ERROR eError;
-
 	LockHandle();
-	eError = PVRSRVReleaseHandleUnlocked(psBase, hHandle, eType);
+	PVRSRVReleaseHandleUnlocked(psBase, hHandle, eType);
 	UnlockHandle();
-
-	return eError;
 }
-
-
 /*!
 ******************************************************************************
-
- @Function	PVRSRVReleaseHandleUnlocked
-
- @Description	Release a handle that is no longer needed without
- 		acquiring/releasing the handle lock. The function assumes you
-		hold the lock when called.
-
- @Input 	hHandle - handle from client
-		eType - handle type
-
- @Return	Error code or PVRSRV_OK
-
+ @Function    PVRSRVReleaseHandleUnlocked
+ @Description Release a handle that is no longer needed without
+              acquiring/releasing the handle lock. The function assumes you
+              hold the lock when called.
+ @Input       hHandle - handle from client
+              eType - handle type
 ******************************************************************************/
-PVRSRV_ERROR PVRSRVReleaseHandleUnlocked(PVRSRV_HANDLE_BASE *psBase,
-				 IMG_HANDLE hHandle,
-				 PVRSRV_HANDLE_TYPE eType)
+void PVRSRVReleaseHandleUnlocked(PVRSRV_HANDLE_BASE *psBase,
+                                 IMG_HANDLE hHandle,
+                                 PVRSRV_HANDLE_TYPE eType)
 {
+	HANDLE_DATA *psHandleData = NULL;
 	PVRSRV_ERROR eError;
 
 	/* PVRSRV_HANDLE_TYPE_NONE is reserved for internal use */
+	PVR_ASSERT(psBase != NULL);
 	PVR_ASSERT(eType != PVRSRV_HANDLE_TYPE_NONE);
 	PVR_ASSERT(gpsHandleFuncs);
 
 	if (psBase == NULL)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "PVRSRVReleaseHandle: Missing handle base"));
-		eError = PVRSRV_ERROR_INVALID_PARAMS;
-		goto Exit;
+		return;
 	}
 
-	eError = FreeHandle(psBase, hHandle, eType, NULL);
+	eError = GetHandleData(psBase, &psHandleData, hHandle, eType);
+	if (unlikely(eError != PVRSRV_OK))
+	{
+		PVR_DPF((PVR_DBG_ERROR, "%s: Error (%s) looking up handle %p of type %s "
+		        "for base %p of type %s.", __func__, PVRSRVGetErrorStringKM(eError),
+		        (void*) hHandle, HandleTypeToString(eType), psBase,
+		        HandleBaseTypeToString(psBase->eType)));
+		PVR_ASSERT(eError == PVRSRV_OK);
+		return;
+	}
 
-Exit:
+	PVR_ASSERT(psHandleData->bCanLookup);
+	PVR_ASSERT(psHandleData->iLookupCount > 0);
 
-	return eError;
+	/* If there are still outstanding lookups for this handle or the handle
+	 * has not been destroyed yet, return early */
+	HandlePut(psHandleData);
 }
 
 /*!
@@ -1777,6 +1714,288 @@ ExitUnlock:
 	UnlockHandle();
 
 	return eError;
+}
+
+static PVRSRV_ERROR HandleUnrefAndMaybeMarkForFreeWrapper(PVRSRV_HANDLE_BASE *psBase,
+                                                          IMG_HANDLE hHandle)
+{
+	HANDLE_DATA *psHandleData;
+	PVRSRV_ERROR eError = GetHandleData(psBase, &psHandleData, hHandle,
+	                                    PVRSRV_HANDLE_TYPE_NONE);
+	if (unlikely(eError != PVRSRV_OK))
+	{
+		return eError;
+	}
+
+	return HandleUnrefAndMaybeMarkForFree(psBase, psHandleData, hHandle, PVRSRV_HANDLE_TYPE_NONE);
+}
+
+static PVRSRV_ERROR HandleUnrefAndMaybeMarkForFree(PVRSRV_HANDLE_BASE *psBase,
+                                                   HANDLE_DATA *psHandleData,
+                                                   IMG_HANDLE hHandle,
+                                                   PVRSRV_HANDLE_TYPE eType)
+{
+	PVRSRV_ERROR eError;
+
+	/* If bCanLookup is false it means that the destructor was called more than
+	 * once on this handle. */
+	if (!psHandleData->bCanLookup)
+	{
+		PVR_DPF((PVR_DBG_ERROR, "%s: Handle %p of type %s already freed.",
+		        __func__, psHandleData->hHandle,
+		        HandleTypeToString(psHandleData->eType)));
+		return PVRSRV_ERROR_HANDLE_NOT_FOUND;
+	}
+
+	if (psHandleData->iLookupCount > 0)
+	{
+        PVR_DPF((PVR_DBG_ERROR, "%s: hHandle=<%p>, iLookupCount=%d", __func__,
+                hHandle, psHandleData->iLookupCount));
+        return PVRSRV_ERROR_OBJECT_STILL_REFERENCED;
+	}
+
+	/* Mark this handle as freed only if it's no longer referenced by any
+	 * lookup. The user space should retry freeing this handle once there are
+	 * no outstanding lookups. */
+	psHandleData->bCanLookup = IMG_FALSE;
+
+#ifdef DEBUG_REFCNT
+	PVR_DPF((PVR_DBG_ERROR, "%s: bCanLookup = false, iLookupCount = %d", __func__,
+	        psHandleData->iLookupCount));
+#endif /* DEBUG_REFCNT */
+
+	/* Prepare children for destruction */
+	eError = IterateOverChildren(psBase, psHandleData,
+	                             HandleUnrefAndMaybeMarkForFreeWrapper);
+	if (unlikely(eError != PVRSRV_OK))
+	{
+		PVR_DPF((PVR_DBG_ERROR, "IterateOverChildren() failed (%s) in %s()",
+		         PVRSRVGetErrorStringKM(eError), __func__));
+		return eError;
+	}
+
+	return PVRSRV_OK;
+}
+
+static PVRSRV_ERROR HandleFreePrivDataWrapper(PVRSRV_HANDLE_BASE *psBase,
+                                              IMG_HANDLE hHandle)
+{
+	HANDLE_DATA *psHandleData;
+	PVRSRV_ERROR eError = GetHandleData(psBase, &psHandleData, hHandle,
+	                                    PVRSRV_HANDLE_TYPE_NONE);
+	if (unlikely(eError != PVRSRV_OK))
+	{
+		return eError;
+	}
+
+	return HandleFreePrivData(psBase, psHandleData, hHandle, PVRSRV_HANDLE_TYPE_NONE);
+}
+
+static PVRSRV_ERROR HandleFreePrivData(PVRSRV_HANDLE_BASE *psBase,
+                                       HANDLE_DATA *psHandleData,
+                                       IMG_HANDLE hHandle,
+                                       PVRSRV_HANDLE_TYPE eType)
+{
+	PVRSRV_ERROR eError;
+
+	/* Call the release data callback for each reference on the handle */
+	if (psHandleData->pfnReleaseData != NULL)
+	{
+		eError = psHandleData->pfnReleaseData(psHandleData->pvData);
+		if (eError == PVRSRV_ERROR_RETRY)
+		{
+			PVR_DPF((PVR_DBG_MESSAGE, "%s: Got retry while calling release "
+			        "data callback for handle %p of type = %s", __func__,
+			        hHandle, HandleTypeToString(psHandleData->eType)));
+
+			return eError;
+		}
+		else if (eError != PVRSRV_OK)
+		{
+			return eError;
+		}
+
+		/* we don't need this so make sure it's not called on
+		 * the pvData for the second time
+		 */
+		psHandleData->pfnReleaseData = NULL;
+	}
+
+	/* Free children's data */
+	eError = IterateOverChildren(psBase, psHandleData,
+	                             HandleFreePrivDataWrapper);
+	if (unlikely(eError != PVRSRV_OK))
+	{
+		PVR_DPF((PVR_DBG_ERROR, "IterateOverChildren() failed (%s) in %s()",
+		         PVRSRVGetErrorStringKM(eError), __func__));
+		return eError;
+	}
+
+	return PVRSRV_OK;
+}
+
+static PVRSRV_ERROR HandleFreeDestroyWrapper(PVRSRV_HANDLE_BASE *psBase,
+                                             IMG_HANDLE hHandle)
+{
+	HANDLE_DATA *psHandleData;
+	PVRSRV_ERROR eError = GetHandleData(psBase, &psHandleData, hHandle,
+	                                    PVRSRV_HANDLE_TYPE_NONE);
+	if (unlikely(eError != PVRSRV_OK))
+	{
+		return eError;
+	}
+
+	return HandleFreeDestroy(psBase, psHandleData, hHandle, PVRSRV_HANDLE_TYPE_NONE);
+}
+
+static PVRSRV_ERROR HandleFreeDestroy(PVRSRV_HANDLE_BASE *psBase,
+                                      HANDLE_DATA *psHandleData,
+                                      IMG_HANDLE hHandle,
+                                      PVRSRV_HANDLE_TYPE eType)
+{
+	HANDLE_DATA *psReleasedHandleData;
+	PVRSRV_ERROR eError;
+
+	eError = UnlinkFromParent(psBase, psHandleData);
+	if (unlikely(eError != PVRSRV_OK))
+	{
+		PVR_DPF((PVR_DBG_ERROR, "UnlinkFromParent() failed (%s) in %s()",
+		         PVRSRVGetErrorStringKM(eError), __func__));
+		return eError;
+	}
+
+	if (!TEST_ALLOC_FLAG(psHandleData, PVRSRV_HANDLE_ALLOC_FLAG_MULTI))
+	{
+		HAND_KEY aKey;
+		IMG_HANDLE hRemovedHandle;
+
+		InitKey(aKey, psBase, psHandleData->pvData, psHandleData->eType,
+		        ParentIfPrivate(psHandleData));
+
+		hRemovedHandle = (IMG_HANDLE) HASH_Remove_Extended(psBase->psHashTab,
+		                                                   aKey);
+
+		PVR_ASSERT(hRemovedHandle != NULL);
+		PVR_ASSERT(hRemovedHandle == psHandleData->hHandle);
+		PVR_UNREFERENCED_PARAMETER(hRemovedHandle);
+	}
+
+	/* Free children */
+	eError = IterateOverChildren(psBase, psHandleData, HandleFreeDestroyWrapper);
+	if (unlikely(eError != PVRSRV_OK))
+	{
+		PVR_DPF((PVR_DBG_ERROR, "IterateOverChildren() failed (%s) in %s()",
+		         PVRSRVGetErrorStringKM(eError), __func__));
+		return eError;
+	}
+
+	eError = gpsHandleFuncs->pfnReleaseHandle(psBase->psImplBase,
+	                                          psHandleData->hHandle,
+	                                          (void **)&psReleasedHandleData);
+	OSFreeMem(psHandleData);
+	if (unlikely(eError != PVRSRV_OK))
+	{
+		PVR_DPF((PVR_DBG_ERROR, "pfnReleaseHandle() failed (%s) in %s()",
+		         PVRSRVGetErrorStringKM(eError), __func__));
+		return eError;
+	}
+
+	return PVRSRV_OK;
+}
+
+static PVRSRV_ERROR DestroyHandle(PVRSRV_HANDLE_BASE *psBase,
+                                  IMG_HANDLE hHandle,
+                                  PVRSRV_HANDLE_TYPE eType,
+                                  IMG_BOOL bReleaseLock)
+{
+	PVRSRV_ERROR eError;
+	HANDLE_DATA *psHandleData = NULL;
+
+	PVR_ASSERT(eType != PVRSRV_HANDLE_TYPE_NONE);
+	PVR_ASSERT(gpsHandleFuncs);
+
+	if (unlikely(psBase == NULL))
+	{
+		PVR_DPF((PVR_DBG_ERROR, "Invalid parameter psBase in %s()", __func__));
+		return PVRSRV_ERROR_INVALID_PARAMS;
+	}
+
+	eError = GetHandleData(psBase, &psHandleData, hHandle, eType);
+	if (unlikely(eError != PVRSRV_OK))
+	{
+		PVR_DPF((PVR_DBG_ERROR, "GetHandleData() failed (%s) in %s()",
+		         PVRSRVGetErrorStringKM(eError), __func__));
+		return eError;
+	}
+
+	eError = HandleUnrefAndMaybeMarkForFree(psBase, psHandleData, hHandle, eType);
+	if (unlikely(eError != PVRSRV_OK))
+	{
+		PVR_DPF((PVR_DBG_ERROR, "HandleUnrefAndMaybeMarkForFree() failed (%s) in %s()",
+		         PVRSRVGetErrorStringKM(eError), __func__));
+		return eError;
+	}
+
+	if (bReleaseLock)
+	{
+		UnlockHandle();
+	}
+
+	eError = HandleFreePrivData(psBase, psHandleData, hHandle, eType);
+	if (eError != PVRSRV_OK)
+	{
+		if (bReleaseLock)
+		{
+			LockHandle();
+		}
+
+		/* If the data could not be freed due to RETRY error the handle needs
+		 * to be kept alive so that the next destroy call could try again */
+		if (eError == PVRSRV_ERROR_RETRY)
+		{
+			psHandleData->bCanLookup = IMG_TRUE;
+		}
+
+		return eError;
+	}
+
+	if (bReleaseLock)
+	{
+		LockHandle();
+	}
+
+	return HandleFreeDestroy(psBase, psHandleData, hHandle, eType);
+}
+
+PVRSRV_ERROR PVRSRVDestroyHandle(PVRSRV_HANDLE_BASE *psBase,
+                                 IMG_HANDLE hHandle,
+                                 PVRSRV_HANDLE_TYPE eType)
+{
+	PVRSRV_ERROR eError;
+
+	LockHandle();
+	eError = DestroyHandle(psBase, hHandle, eType, IMG_FALSE);
+	UnlockHandle();
+
+	return eError;
+}
+
+/*!
+*******************************************************************************
+ @Function      PVRSRVDestroyHandleUnlocked
+ @Description   Destroys a handle that is no longer needed without
+                acquiring/releasing the handle lock. The function assumes you
+                hold the lock when called.
+ @Input         psBase - pointer to handle base structure
+                hHandle - handle from client
+                eType - handle type
+ @Return        Error code or PVRSRV_OK
+******************************************************************************/
+PVRSRV_ERROR PVRSRVDestroyHandleUnlocked(PVRSRV_HANDLE_BASE *psBase,
+                                         IMG_HANDLE hHandle,
+                                         PVRSRV_HANDLE_TYPE eType)
+{
+	return DestroyHandle(psBase, hHandle, eType, IMG_FALSE);
 }
 
 /*!
@@ -1926,18 +2145,15 @@ static PVRSRV_ERROR ListHandlesInBase(IMG_HANDLE hHandle, void *pvData)
 
 	if (psHandleData != NULL)
 	{
-		PVR_DPF((PVR_DBG_WARNING, "    Handle: %6u, Refs: %3u, Type: %s (%u)",
-				(IMG_UINT32) (uintptr_t) psHandleData->hHandle,
-				psHandleData->ui32RefCount,
-				HandleTypeToString(psHandleData->eType),
-				psHandleData->eType));
+		PVR_DPF((PVR_DBG_WARNING,
+		        "    Handle: %6u, CanLookup: %u, LookupCount: %3u, Type: %s (%u), pvData<%p>",
+		       (IMG_UINT32) (uintptr_t) psHandleData->hHandle, psHandleData->bCanLookup,
+		       psHandleData->iLookupCount, HandleTypeToString(psHandleData->eType),
+		       psHandleData->eType, psHandleData->pvData));
 	}
 
 	return PVRSRV_OK;
 }
-
-
-
 #endif /* defined(DEBUG) */
 
 typedef struct FREE_HANDLE_DATA_TAG
@@ -1998,20 +2214,18 @@ static PVRSRV_ERROR FreeHandleDataWrapper(IMG_HANDLE hHandle, void *pvData)
 		return PVRSRV_OK;
 	}
 
-	PVR_ASSERT(psHandleData->ui32RefCount > 0);
+	PVR_ASSERT(psHandleData->bCanLookup && psHandleData->iLookupCount == 0);
 
-	while (psHandleData->ui32RefCount != 0)
+	if (psHandleData->bCanLookup)
 	{
 		if (psHandleData->pfnReleaseData != NULL)
 		{
 			eError = psHandleData->pfnReleaseData(psHandleData->pvData);
 			if (eError == PVRSRV_ERROR_RETRY)
 			{
-				PVR_DPF((PVR_DBG_MESSAGE,
-					 "FreeHandleDataWrapper: "
-					 "Got retry while calling release data callback for %p (type = %d)",
-					 hHandle,
-					 (IMG_UINT32)psHandleData->eType));
+				PVR_DPF((PVR_DBG_MESSAGE, "%s: Got retry while calling release "
+				        "data callback for handle %p of type = %s", __func__,
+				        hHandle, HandleTypeToString(psHandleData->eType)));
 
 				return eError;
 			}
@@ -2021,7 +2235,7 @@ static PVRSRV_ERROR FreeHandleDataWrapper(IMG_HANDLE hHandle, void *pvData)
 			}
 		}
 
-		_HandleUnref(psHandleData);
+		psHandleData->bCanLookup = IMG_FALSE;
 	}
 
 	if (!TEST_ALLOC_FLAG(psHandleData, PVRSRV_HANDLE_ALLOC_FLAG_MULTI))
